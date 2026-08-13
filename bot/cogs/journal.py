@@ -98,6 +98,39 @@ async def _resolve_member_sessions(db, discord_id: str, vague_id: int | None, se
     return sessions, member["nom"], f"vague {wave['nom']}, semaine {target_semaine}", False
 
 
+class ObjectifVagueModal(discord.ui.Modal, title="Objectif de vague"):
+    def __init__(self, objectif_actuel: str | None):
+        super().__init__()
+        self.objectif = discord.ui.TextInput(
+            label="Ton objectif pour toute la vague",
+            style=discord.TextStyle.paragraph,
+            max_length=1000,
+            required=True,
+            default=objectif_actuel or "",
+        )
+        self.add_item(self.objectif)
+
+    async def on_submit(self, interaction: discord.Interaction):
+        async with get_connection() as db:
+            wave = await get_active_wave(db)
+            if wave is None:
+                await interaction.response.send_message("Aucune vague active.", ephemeral=True)
+                return
+
+            member = await get_member(db, str(interaction.user.id), wave["id"])
+            if member is None:
+                await interaction.response.send_message(
+                    "Tu n'es pas enregistré comme membre de la vague active.", ephemeral=True
+                )
+                return
+
+            await update_objectif(db, member["id"], str(self.objectif))
+
+        await interaction.response.send_message(
+            f"Objectif de vague mis à jour : {self.objectif}", ephemeral=True
+        )
+
+
 class JournalCog(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
@@ -254,7 +287,7 @@ class JournalCog(commands.Cog):
     @app_commands.command(
         name="objectif-vague", description="Définit ou met à jour ton objectif global de vague"
     )
-    async def objectif_vague(self, interaction: discord.Interaction, objectif: str):
+    async def objectif_vague(self, interaction: discord.Interaction):
         async with get_connection() as db:
             wave = await get_active_wave(db)
             if wave is None:
@@ -268,10 +301,9 @@ class JournalCog(commands.Cog):
                 )
                 return
 
-            await update_objectif(db, member["id"], objectif)
-            await interaction.response.send_message(
-                f"Objectif de vague mis à jour : {objectif}", ephemeral=True
-            )
+            objectif_actuel = member["objectif_vague"]
+
+        await interaction.response.send_modal(ObjectifVagueModal(objectif_actuel))
 
 
 async def setup(bot: commands.Bot):

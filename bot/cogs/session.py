@@ -21,17 +21,19 @@ from bot.db.waves import get_active_wave
 from bot.services.weeks import week_number_for_date
 
 
-class SessionCog(commands.Cog):
-    def __init__(self, bot: commands.Bot):
-        self.bot = bot
-
-    @app_commands.command(name="session-start", description="Démarre une session de coworking")
-    @app_commands.choices(
-        creneau=[app_commands.Choice(name=c, value=c) for c in CRENEAUX]
+class SessionStartModal(discord.ui.Modal, title="Démarrer une session"):
+    objectif = discord.ui.TextInput(
+        label="Objectif de la session",
+        style=discord.TextStyle.paragraph,
+        max_length=1000,
+        required=True,
     )
-    async def session_start(
-        self, interaction: discord.Interaction, creneau: app_commands.Choice[str], objectif: str
-    ):
+
+    def __init__(self, creneau: str):
+        super().__init__()
+        self.creneau = creneau
+
+    async def on_submit(self, interaction: discord.Interaction):
         async with get_connection() as db:
             wave = await get_active_wave(db)
             if wave is None:
@@ -79,28 +81,38 @@ class SessionCog(commands.Cog):
                 wave_id=wave["id"],
                 semaine=semaine,
                 session_date=today,
-                creneau=creneau.value,
+                creneau=self.creneau,
                 canal_id=str(channel.id),
                 canal_nom=channel.name,
                 debut=now,
-                objectif=objectif,
+                objectif=str(self.objectif),
             )
 
             await interaction.response.send_message(
-                f"{interaction.user.mention} démarre une session — créneau **{creneau.value}**, "
-                f"salon **{channel.name}**.\nObjectif : {objectif}"
+                f"{interaction.user.mention} démarre une session — créneau **{self.creneau}**, "
+                f"salon **{channel.name}**.\nObjectif : {self.objectif}"
             )
 
-    @app_commands.command(name="session-end", description="Clôture ta session en cours")
-    async def session_end(
-        self, interaction: discord.Interaction, bilan: str, blocages: str | None = None
-    ):
+
+class SessionEndModal(discord.ui.Modal, title="Clôturer ta session"):
+    bilan = discord.ui.TextInput(
+        label="Bilan — qu'as-tu fait ?",
+        style=discord.TextStyle.paragraph,
+        max_length=1000,
+        required=True,
+    )
+    blocages = discord.ui.TextInput(
+        label="Blocages (optionnel)",
+        style=discord.TextStyle.paragraph,
+        max_length=1000,
+        required=False,
+    )
+
+    async def on_submit(self, interaction: discord.Interaction):
         async with get_connection() as db:
             wave = await get_active_wave(db)
             if wave is None:
-                await interaction.response.send_message(
-                    "Aucune vague active.", ephemeral=True
-                )
+                await interaction.response.send_message("Aucune vague active.", ephemeral=True)
                 return
 
             member = await get_member(db, str(interaction.user.id), wave["id"])
@@ -118,18 +130,67 @@ class SessionCog(commands.Cog):
                 return
 
             now = datetime.now(TZ)
-            await end_session(db, open_session["id"], now, bilan, blocages)
+            blocages_val = str(self.blocages) if self.blocages else None
+            await end_session(db, open_session["id"], now, str(self.bilan), blocages_val)
 
             debut = datetime.fromisoformat(open_session["debut"])
             duree = now - debut
             duree_str = str(duree).split(".")[0]
 
-            texte = f"{interaction.user.mention} clôture sa session — durée **{duree_str}**.\nBilan : {bilan}"
-            if blocages:
-                texte += f"\nBlocages : {blocages}"
+            texte = f"{interaction.user.mention} clôture sa session — durée **{duree_str}**.\nBilan : {self.bilan}"
+            if blocages_val:
+                texte += f"\nBlocages : {blocages_val}"
+            await interaction.response.send_message(texte)
+
+
+class SessionCorrigerModal(discord.ui.Modal):
+    def __init__(self, id_session: int, champ: str, valeur_actuelle: str | None):
+        super().__init__(title=f"Corriger la session #{id_session}")
+        self.id_session = id_session
+        self.champ = champ
+        style = discord.TextStyle.short if champ == "creneau" else discord.TextStyle.paragraph
+        self.valeur = discord.ui.TextInput(
+            label=champ.capitalize(),
+            style=style,
+            max_length=1000,
+            required=True,
+            default=valeur_actuelle or "",
+        )
+        self.add_item(self.valeur)
+
+    async def on_submit(self, interaction: discord.Interaction):
+        valeur = str(self.valeur)
+
+        if self.champ == "creneau" and valeur not in CRENEAUX:
             await interaction.response.send_message(
-                texte,
+                f"Créneau invalide. Valeurs possibles : {', '.join(CRENEAUX)}", ephemeral=True
             )
+            return
+
+        async with get_connection() as db:
+            await update_field(db, self.id_session, self.champ, valeur)
+
+        await interaction.response.send_message(
+            f"Session {self.id_session} mise à jour — `{self.champ}` → {valeur}", ephemeral=True
+        )
+
+
+class SessionCog(commands.Cog):
+    def __init__(self, bot: commands.Bot):
+        self.bot = bot
+
+    @app_commands.command(name="session-start", description="Démarre une session de coworking")
+    @app_commands.choices(
+        creneau=[app_commands.Choice(name=c, value=c) for c in CRENEAUX]
+    )
+    async def session_start(
+        self, interaction: discord.Interaction, creneau: app_commands.Choice[str]
+    ):
+        await interaction.response.send_modal(SessionStartModal(creneau.value))
+
+    @app_commands.command(name="session-end", description="Clôture ta session en cours")
+    async def session_end(self, interaction: discord.Interaction):
+        await interaction.response.send_modal(SessionEndModal())
 
     @app_commands.command(
         name="session-corriger", description="Corrige ou supprime une session saisie par erreur"
@@ -145,7 +206,6 @@ class SessionCog(commands.Cog):
         interaction: discord.Interaction,
         id_session: int,
         champ: app_commands.Choice[str],
-        valeur: str | None = None,
     ):
         async with get_connection() as db:
             wave = await get_active_wave(db)
@@ -173,22 +233,11 @@ class SessionCog(commands.Cog):
                 )
                 return
 
-            if valeur is None:
-                await interaction.response.send_message(
-                    "Le paramètre `valeur` est requis pour ce champ.", ephemeral=True
-                )
-                return
+            valeur_actuelle = session[champ.value]
 
-            if champ.value == "creneau" and valeur not in CRENEAUX:
-                await interaction.response.send_message(
-                    f"Créneau invalide. Valeurs possibles : {', '.join(CRENEAUX)}", ephemeral=True
-                )
-                return
-
-            await update_field(db, id_session, champ.value, valeur)
-            await interaction.response.send_message(
-                f"Session {id_session} mise à jour — `{champ.value}` → {valeur}", ephemeral=True
-            )
+        await interaction.response.send_modal(
+            SessionCorrigerModal(id_session, champ.value, valeur_actuelle)
+        )
 
     @session_corriger.autocomplete("id_session")
     async def session_corriger_id_autocomplete(

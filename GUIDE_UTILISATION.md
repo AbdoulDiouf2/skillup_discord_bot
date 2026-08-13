@@ -15,22 +15,20 @@ Avant de démarrer une session, connecte-toi à un salon vocal **Coworking** (le
 ### 2. Démarre ta session — `/session-start`
 
 ```
-/session-start créneau:5h-7h objectif:Terminer le module 3 de la certif Databricks
+/session-start créneau:5h-7h
 ```
 
-- `créneau` : choisis dans la liste (`5h-7h`, `19h-21h`, `21h-23h`)
-- `objectif` : ce que tu comptes faire pendant la session
+Choisis le `créneau` dans la liste (`5h-7h`, `19h-21h`, `21h-23h`), puis une **fenêtre s'ouvre** pour écrire ton objectif — texte multi-lignes, comme avant le bot (pas besoin de tout tasser sur une ligne).
 
 Le bot confirme avec le salon détecté.
 
 ### 3. Clôture ta session en fin de créneau — `/session-end`
 
 ```
-/session-end bilan:Module 3 terminé, quiz réussi blocages:Bloqué sur la partie SQL avancé
+/session-end
 ```
 
-- `bilan` : ce que tu as réellement fait (obligatoire)
-- `blocages` : difficultés rencontrées (optionnel)
+Une fenêtre s'ouvre avec deux champs multi-lignes : `bilan` (ce que t'as fait, obligatoire) et `blocages` (optionnel).
 
 ⚠️ Tu ne peux avoir qu'**une seule session ouverte** à la fois. Si tu oublies de clôturer, le bot le fait automatiquement à minuit (statut « incomplète »).
 
@@ -80,19 +78,20 @@ Le bot génère un récap propre (nombre de sessions, temps total, blocages) —
 
 ## Ton objectif de vague — `/objectif-vague`
 
-À définir une fois en début de vague (modifiable à tout moment) :
+À définir une fois en début de vague (modifiable à tout moment) — tape la commande, une fenêtre multi-lignes s'ouvre (pré-remplie avec ton objectif actuel si tu en as déjà un) :
 ```
-/objectif-vague objectif:Obtenir la certification Databricks Data Engineer Associate
+/objectif-vague
 ```
 
 ## Corriger une erreur de saisie — `/session-corriger`
 
 Tapé le mauvais bilan ? Oublié un blocage ? Tape `/session-corriger`, le champ `id_session` te propose directement tes sessions récentes (pas besoin de retenir le numéro) :
 ```
-/session-corriger id_session:[choisis dans la liste] champ:bilan valeur:Le vrai bilan cette fois
+/session-corriger id_session:[choisis dans la liste] champ:bilan
 ```
+Une fenêtre s'ouvre, pré-remplie avec la valeur actuelle — modifie et valide.
 
-Pour supprimer une session saisie par erreur :
+Pour supprimer une session saisie par erreur (pas de fenêtre dans ce cas, suppression directe) :
 ```
 /session-corriger id_session:[...] champ:suppression
 ```
