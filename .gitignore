@@ -8,3 +8,5 @@ venv/
 .pytest_cache/
 .vscode/
 *.log
+data/skillup.db.pre-wipe-backup
+public/backfill_sessions_skillup (1).json
