@@ -8,6 +8,7 @@ from bot.config import ADMIN_ROLE_NAME, TZ
 from bot.db.database import get_connection
 from bot.db.binomes import BinomeError, define_binome, get_partner_id, list_binomes_semaine, remove_binome
 from bot.db.members import add_member, get_member, get_member_by_id, list_by_wave
+from bot.db.sessions import list_filtered
 from bot.db.waves import (
     WaveError,
     activate_wave,
@@ -435,6 +436,87 @@ class AdminCog(commands.Cog):
 
     @binomes_semaine.autocomplete("vague")
     async def binomes_semaine_vague_autocomplete(self, interaction: discord.Interaction, current: str):
+        async with get_connection() as db:
+            waves = await list_waves(db)
+        choices = []
+        for w in waves:
+            label = f"#{w['id']} · {w['nom']} ({w['statut']})"
+            if current and current.lower() not in label.lower():
+                continue
+            choices.append(app_commands.Choice(name=label[:100], value=w["id"]))
+        return choices[:25]
+
+    @app_commands.command(
+        name="sessions-lister", description="[Admin] Liste les sessions avec filtres optionnels"
+    )
+    @app_commands.choices(
+        statut=[
+            app_commands.Choice(name=s, value=s) for s in ("ouverte", "complète", "incomplète")
+        ]
+    )
+    @is_admin()
+    async def sessions_lister(
+        self,
+        interaction: discord.Interaction,
+        membre: discord.Member | None = None,
+        vague: int | None = None,
+        semaine: int | None = None,
+        statut: app_commands.Choice[str] | None = None,
+    ):
+        async with get_connection() as db:
+            member_id = None
+            if membre is not None:
+                if vague is not None:
+                    wave_for_member = await get_wave_by_id(db, vague)
+                else:
+                    wave_for_member = await get_active_wave(db)
+                if wave_for_member is None:
+                    await interaction.response.send_message(
+                        "Vague introuvable ou aucune vague active.", ephemeral=True
+                    )
+                    return
+                m = await get_member(db, str(membre.id), wave_for_member["id"])
+                if m is None:
+                    await interaction.response.send_message(
+                        f"{membre.mention} n'est pas membre de cette vague.", ephemeral=True
+                    )
+                    return
+                member_id = m["id"]
+
+            sessions = await list_filtered(
+                db,
+                wave_id=vague,
+                semaine=semaine,
+                member_id=member_id,
+                statut=statut.value if statut else None,
+            )
+
+        if not sessions:
+            await interaction.response.send_message(
+                "Aucune session ne correspond à ces critères.", ephemeral=True
+            )
+            return
+
+        lignes = []
+        for s in sessions:
+            duree = ""
+            if s["fin"]:
+                debut = datetime.fromisoformat(s["debut"])
+                fin = datetime.fromisoformat(s["fin"])
+                duree = f" ({str(fin - debut).split('.')[0]})"
+            lignes.append(
+                f"#{s['id']} · {s['date']} · {s['creneau']} · {s['membre_nom']} · "
+                f"{s['wave_nom']} S{s['semaine']} · {s['statut']}{duree}"
+            )
+
+        texte = f"**Sessions** ({len(sessions)})\n\n" + "\n".join(lignes)
+        if len(texte) > 1900:
+            texte = texte[:1900] + "\n… (tronqué, affine les filtres)"
+
+        await interaction.response.send_message(texte, ephemeral=True)
+
+    @sessions_lister.autocomplete("vague")
+    async def sessions_lister_vague_autocomplete(self, interaction: discord.Interaction, current: str):
         async with get_connection() as db:
             waves = await list_waves(db)
         choices = []

@@ -77,6 +77,45 @@ async def list_by_member_ids_and_semaine(
         return await cur.fetchall()
 
 
+async def list_filtered(
+    db: aiosqlite.Connection,
+    wave_id: int | None = None,
+    semaine: int | None = None,
+    member_id: int | None = None,
+    statut: str | None = None,
+    limit: int = 50,
+) -> list[aiosqlite.Row]:
+    db.row_factory = aiosqlite.Row
+    clauses = []
+    params: list = []
+    if wave_id is not None:
+        clauses.append("sessions.wave_id = ?")
+        params.append(wave_id)
+    if semaine is not None:
+        clauses.append("sessions.semaine = ?")
+        params.append(semaine)
+    if member_id is not None:
+        clauses.append("sessions.member_id = ?")
+        params.append(member_id)
+    if statut is not None:
+        clauses.append("sessions.statut = ?")
+        params.append(statut)
+
+    where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
+    params.append(limit)
+    async with db.execute(
+        f"""SELECT sessions.*, members.nom AS membre_nom, waves.nom AS wave_nom
+            FROM sessions
+            JOIN members ON members.id = sessions.member_id
+            JOIN waves ON waves.id = sessions.wave_id
+            {where}
+            ORDER BY sessions.debut DESC
+            LIMIT ?""",
+        params,
+    ) as cur:
+        return await cur.fetchall()
+
+
 async def list_recent_by_member(
     db: aiosqlite.Connection, member_id: int, limit: int = 25
 ) -> list[aiosqlite.Row]:

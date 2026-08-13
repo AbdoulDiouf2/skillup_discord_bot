@@ -87,9 +87,8 @@ class SessionCog(commands.Cog):
             )
 
             await interaction.response.send_message(
-                f"Session démarrée — créneau **{creneau.value}**, salon **{channel.name}**.\n"
-                f"Objectif : {objectif}",
-                ephemeral=True,
+                f"{interaction.user.mention} démarre une session — créneau **{creneau.value}**, "
+                f"salon **{channel.name}**.\nObjectif : {objectif}"
             )
 
     @app_commands.command(name="session-end", description="Clôture ta session en cours")
@@ -125,9 +124,11 @@ class SessionCog(commands.Cog):
             duree = now - debut
             duree_str = str(duree).split(".")[0]
 
+            texte = f"{interaction.user.mention} clôture sa session — durée **{duree_str}**.\nBilan : {bilan}"
+            if blocages:
+                texte += f"\nBlocages : {blocages}"
             await interaction.response.send_message(
-                f"Session clôturée — durée **{duree_str}**.\nBilan : {bilan}",
-                ephemeral=True,
+                texte,
             )
 
     @app_commands.command(
