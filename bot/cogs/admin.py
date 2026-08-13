@@ -6,9 +6,17 @@ from discord.ext import commands
 
 from bot.config import ADMIN_ROLE_NAME, TZ
 from bot.db.database import get_connection
-from bot.db.binomes import define_binome
+from bot.db.binomes import define_binome, list_binomes_semaine
 from bot.db.members import add_member, get_member
-from bot.db.waves import create_wave, get_active_wave
+from bot.db.waves import (
+    WaveError,
+    activate_wave,
+    close_wave,
+    create_wave,
+    get_active_wave,
+    get_wave_by_id,
+    list_waves,
+)
 from bot.services.weeks import week_number_for_date
 
 PROFILS = ("étudiant", "demandeur d'emploi", "cadre", "alternant", "autre")
@@ -48,9 +56,68 @@ class AdminCog(commands.Cog):
             wave_id = await create_wave(db, nom, debut, fin)
 
         await interaction.response.send_message(
-            f"Vague **{nom}** créée et activée (id {wave_id}, du {debut} au {fin}).",
+            f"Vague **{nom}** créée en brouillon (id {wave_id}, du {debut} au {fin}). "
+            f"Utilise `/vague-activer` pour l'activer.",
             ephemeral=True,
         )
+
+    @app_commands.command(name="vague-activer", description="[Admin] Active une vague en brouillon")
+    @is_admin()
+    async def vague_activer(self, interaction: discord.Interaction, vague_id: int):
+        async with get_connection() as db:
+            try:
+                wave = await activate_wave(db, vague_id)
+            except WaveError as e:
+                await interaction.response.send_message(str(e), ephemeral=True)
+                return
+
+        await interaction.response.send_message(
+            f"Vague **{wave['nom']}** activée.", ephemeral=True
+        )
+
+    @vague_activer.autocomplete("vague_id")
+    async def vague_activer_autocomplete(
+        self, interaction: discord.Interaction, current: str
+    ) -> list[app_commands.Choice[int]]:
+        async with get_connection() as db:
+            waves = await list_waves(db, statut="brouillon")
+        choices = []
+        for w in waves:
+            label = f"#{w['id']} · {w['nom']} · {w['date_debut']} → {w['date_fin']}"
+            if current and current.lower() not in label.lower():
+                continue
+            choices.append(app_commands.Choice(name=label[:100], value=w["id"]))
+        return choices[:25]
+
+    @app_commands.command(
+        name="vague-cloturer", description="[Admin] Clôture une vague (par défaut la vague active)"
+    )
+    @is_admin()
+    async def vague_cloturer(self, interaction: discord.Interaction, vague_id: int | None = None):
+        async with get_connection() as db:
+            try:
+                wave = await close_wave(db, vague_id)
+            except WaveError as e:
+                await interaction.response.send_message(str(e), ephemeral=True)
+                return
+
+        await interaction.response.send_message(
+            f"Vague **{wave['nom']}** clôturée.", ephemeral=True
+        )
+
+    @vague_cloturer.autocomplete("vague_id")
+    async def vague_cloturer_autocomplete(
+        self, interaction: discord.Interaction, current: str
+    ) -> list[app_commands.Choice[int]]:
+        async with get_connection() as db:
+            waves = await list_waves(db, statut="active")
+        choices = []
+        for w in waves:
+            label = f"#{w['id']} · {w['nom']} · {w['date_debut']} → {w['date_fin']}"
+            if current and current.lower() not in label.lower():
+                continue
+            choices.append(app_commands.Choice(name=label[:100], value=w["id"]))
+        return choices[:25]
 
     @app_commands.command(name="membre-ajouter", description="[Admin] Ajoute un membre à la vague active")
     @app_commands.choices(
@@ -153,6 +220,79 @@ class AdminCog(commands.Cog):
             f"Binôme semaine {semaine} : {membre_a.mention} ↔ {membre_b.mention}",
             ephemeral=True,
         )
+
+    @app_commands.command(name="vague-lister", description="[Admin] Liste toutes les vagues et leur statut")
+    @is_admin()
+    async def vague_lister(self, interaction: discord.Interaction):
+        async with get_connection() as db:
+            waves = await list_waves(db)
+
+        if not waves:
+            await interaction.response.send_message("Aucune vague enregistrée.", ephemeral=True)
+            return
+
+        lignes = [
+            f"#{w['id']} · **{w['nom']}** — {w['statut']} ({w['date_debut']} → {w['date_fin']})"
+            for w in waves
+        ]
+        await interaction.response.send_message(
+            "**Vagues**\n\n" + "\n".join(lignes), ephemeral=True
+        )
+
+    @app_commands.command(
+        name="binomes-semaine", description="[Admin] Liste les binômes constitués pour une semaine"
+    )
+    @is_admin()
+    async def binomes_semaine(
+        self,
+        interaction: discord.Interaction,
+        semaine: int | None = None,
+        vague: int | None = None,
+    ):
+        async with get_connection() as db:
+            if vague is not None:
+                wave = await get_wave_by_id(db, vague)
+                if wave is None:
+                    await interaction.response.send_message("Vague introuvable.", ephemeral=True)
+                    return
+            else:
+                wave = await get_active_wave(db)
+                if wave is None:
+                    await interaction.response.send_message("Aucune vague active.", ephemeral=True)
+                    return
+
+            if semaine is not None:
+                target_semaine = semaine
+            else:
+                wave_start = datetime.fromisoformat(wave["date_debut"]).date()
+                target_semaine = week_number_for_date(datetime.now(TZ).date(), wave_start)
+
+            binomes = await list_binomes_semaine(db, wave["id"], target_semaine)
+
+        if not binomes:
+            await interaction.response.send_message(
+                f"Aucun binôme constitué pour la vague **{wave['nom']}**, semaine {target_semaine}.",
+                ephemeral=True,
+            )
+            return
+
+        lignes = [f"{b['nom_a']} ↔ {b['nom_b']}" for b in binomes]
+        await interaction.response.send_message(
+            f"**Binômes — {wave['nom']}, semaine {target_semaine}**\n\n" + "\n".join(lignes),
+            ephemeral=True,
+        )
+
+    @binomes_semaine.autocomplete("vague")
+    async def binomes_semaine_vague_autocomplete(self, interaction: discord.Interaction, current: str):
+        async with get_connection() as db:
+            waves = await list_waves(db)
+        choices = []
+        for w in waves:
+            label = f"#{w['id']} · {w['nom']} ({w['statut']})"
+            if current and current.lower() not in label.lower():
+                continue
+            choices.append(app_commands.Choice(name=label[:100], value=w["id"]))
+        return choices[:25]
 
 
 async def setup(bot: commands.Bot):

@@ -15,6 +15,7 @@ INITIAL_COGS = (
     "bot.cogs.journal",
     "bot.cogs.admin",
     "bot.cogs.coworking_setup",
+    "bot.cogs.guide",
 )
 
 intents = discord.Intents.default()

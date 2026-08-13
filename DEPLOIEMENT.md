@@ -153,6 +153,6 @@ DELETE FROM members WHERE id = <id>;
 - [ ] Intents `Server Members` activé sur le Developer Portal (nécessaire pour la détection vocale RG-11/RG-12)
 - [ ] Rôle Discord `Admin SkillUp` créé et attribué à l'équipe qui pilote l'initiative
 - [ ] Salons de coworking déclarés via `/salon-coworking-ajouter`
-- [ ] Vague créée via `/vague-creer`, membres ajoutés via `/membre-ajouter`
+- [ ] Vague créée via `/vague-creer` (brouillon), **activée via `/vague-activer`**, membres ajoutés via `/membre-ajouter`
 - [ ] Service systemd actif, `enable` pour survivre à un reboot
 - [ ] Cron de sauvegarde en place et testé une fois manuellement

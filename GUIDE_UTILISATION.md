@@ -36,14 +36,19 @@ Tu peux enchaîner plusieurs sessions dans la même journée (ex. 5h-7h puis 19h
 
 ### `/mon-journal`
 
-Affiche toutes tes sessions de la semaine en cours :
+Affiche toutes tes sessions de la semaine en cours (vague active) :
 ```
 /mon-journal
 ```
 
-Pour une semaine précédente :
+Pour une semaine précédente, **sans préciser de vague**, le bot cherche ce numéro de semaine à travers **toutes** les vagues auxquelles tu as participé :
 ```
 /mon-journal semaine:1
+```
+
+Pour cibler une vague précise (utile si tu as fait plusieurs vagues) :
+```
+/mon-journal vague:[choisis dans la liste] semaine:1
 ```
 
 Chaque session affiche un numéro (`#12`) — utile pour `/session-corriger`.
@@ -55,6 +60,8 @@ Chaque session affiche un numéro (`#12`) — utile pour `/session-corriger`.
 /binome-journal
 ```
 
+Sans précision, ça regarde toujours la **vague active**. Si tu précises `semaine` sans préciser `vague` et que plusieurs vagues existent, le bot te demande de préciser laquelle (les binômes sont définis par vague + semaine, pas de recherche floue possible ici).
+
 Si tu étais en solo cette semaine-là, le bot te le dit clairement — pas d'erreur, juste une info.
 
 ## Générer ton bilan hebdomadaire — `/bilan-semaine`
@@ -62,6 +69,8 @@ Si tu étais en solo cette semaine-là, le bot te le dit clairement — pas d'er
 ```
 /bilan-semaine
 ```
+
+Même logique que `/mon-journal` pour les paramètres `vague`/`semaine` optionnels.
 
 Le bot génère un récap propre (nombre de sessions, temps total, blocages) — copie-le tel quel dans le forum `objectifs` pour ta réunion de bilan.
 

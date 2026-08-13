@@ -5,8 +5,14 @@ CREATE TABLE IF NOT EXISTS waves (
     nom         TEXT NOT NULL,
     date_debut  DATE NOT NULL,
     date_fin    DATE NOT NULL,
-    active      BOOLEAN NOT NULL DEFAULT 0
+    statut      TEXT NOT NULL DEFAULT 'brouillon' CHECK (statut IN ('brouillon', 'active', 'cloturee'))
 );
+
+-- Une seule vague active à la fois — filet de sécurité en base, en plus du
+-- contrôle applicatif fait dans /vague-activer.
+CREATE UNIQUE INDEX IF NOT EXISTS idx_one_active_wave
+    ON waves((1))
+    WHERE statut = 'active';
 
 CREATE TABLE IF NOT EXISTS members (
     id                INTEGER PRIMARY KEY AUTOINCREMENT,

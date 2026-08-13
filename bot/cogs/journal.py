@@ -7,21 +7,24 @@ from discord.ext import commands
 from bot.config import TZ
 from bot.db.database import get_connection
 from bot.db.binomes import get_partner_id
-from bot.db.members import get_member, get_member_by_id, update_objectif
-from bot.db.sessions import list_by_member_week
-from bot.db.waves import get_active_wave
+from bot.db.members import get_member, get_member_all_waves, get_member_by_id, update_objectif
+from bot.db.sessions import list_by_member_ids_and_semaine, list_by_member_week
+from bot.db.waves import get_active_wave, get_wave_by_id, list_waves
 from bot.services.weeks import week_number_for_date
 
 
-def _format_session_line(s) -> str:
+def _format_session_line(s, show_wave: bool = False) -> str:
     duree = ""
     if s["fin"]:
         debut = datetime.fromisoformat(s["debut"])
         fin = datetime.fromisoformat(s["fin"])
         duree = f" ({str(fin - debut).split('.')[0]})"
     statut = s["statut"]
+    entete = f"**#{s['id']} · {s['date']} · {s['creneau']}**"
+    if show_wave:
+        entete += f" · {s['wave_nom']}"
     lignes = [
-        f"**#{s['id']} · {s['date']} · {s['creneau']}** — {statut}{duree}",
+        f"{entete} — {statut}{duree}",
         f"Objectif : {s['objectif']}",
     ]
     if s["bilan"]:
@@ -31,73 +34,161 @@ def _format_session_line(s) -> str:
     return "\n".join(lignes)
 
 
-def _format_journal(nom: str, semaine: int, sessions: list) -> str:
+def _format_journal(nom: str, label: str, sessions: list, show_wave: bool = False) -> str:
     if not sessions:
-        return f"**Journal de {nom} — semaine {semaine}**\nAucune session enregistrée."
-    corps = "\n\n".join(_format_session_line(s) for s in sessions)
-    return f"**Journal de {nom} — semaine {semaine}**\n\n{corps}"
+        return f"**Journal de {nom} — {label}**\nAucune session enregistrée."
+    corps = "\n\n".join(_format_session_line(s, show_wave) for s in sessions)
+    return f"**Journal de {nom} — {label}**\n\n{corps}"
+
+
+async def _wave_autocomplete(db, current: str) -> list[app_commands.Choice[int]]:
+    waves = await list_waves(db)
+    choices = []
+    for w in waves:
+        label = f"#{w['id']} · {w['nom']} ({w['statut']}) · {w['date_debut']} → {w['date_fin']}"
+        if current and current.lower() not in label.lower():
+            continue
+        choices.append(app_commands.Choice(name=label[:100], value=w["id"]))
+    return choices[:25]
+
+
+class ResolutionError(Exception):
+    pass
+
+
+async def _resolve_member_sessions(db, discord_id: str, vague_id: int | None, semaine: int | None):
+    """Résout (sessions, nom_affiché, label, show_wave) selon la règle :
+    - ni vague ni semaine -> vague active + semaine courante
+    - semaine seul (sans vague) -> recherche à travers toutes les vagues
+    - vague précisée -> filtre strict sur cette vague (semaine optionnelle, défaut semaine courante de cette vague)
+    """
+    if vague_id is None and semaine is None:
+        wave = await get_active_wave(db)
+        if wave is None:
+            raise ResolutionError("Aucune vague active.")
+        member = await get_member(db, discord_id, wave["id"])
+        if member is None:
+            raise ResolutionError("Tu n'es pas enregistré comme membre de la vague active.")
+        wave_start = datetime.fromisoformat(wave["date_debut"]).date()
+        target_semaine = week_number_for_date(datetime.now(TZ).date(), wave_start)
+        sessions = await list_by_member_week(db, member["id"], wave["id"], target_semaine)
+        return sessions, member["nom"], f"vague {wave['nom']}, semaine {target_semaine}", False
+
+    if vague_id is None and semaine is not None:
+        members = await get_member_all_waves(db, discord_id)
+        if not members:
+            raise ResolutionError("Tu n'es enregistré dans aucune vague.")
+        member_ids = [m["id"] for m in members]
+        sessions = await list_by_member_ids_and_semaine(db, member_ids, semaine)
+        return sessions, members[0]["nom"], f"semaine {semaine} (toutes vagues)", True
+
+    # vague_id précisé
+    wave = await get_wave_by_id(db, vague_id)
+    if wave is None:
+        raise ResolutionError("Vague introuvable.")
+    member = await get_member(db, discord_id, wave["id"])
+    if member is None:
+        raise ResolutionError(f"Tu n'es pas enregistré comme membre de la vague **{wave['nom']}**.")
+    if semaine is not None:
+        target_semaine = semaine
+    else:
+        wave_start = datetime.fromisoformat(wave["date_debut"]).date()
+        target_semaine = week_number_for_date(datetime.now(TZ).date(), wave_start)
+    sessions = await list_by_member_week(db, member["id"], wave["id"], target_semaine)
+    return sessions, member["nom"], f"vague {wave['nom']}, semaine {target_semaine}", False
 
 
 class JournalCog(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
 
-    @app_commands.command(name="mon-journal", description="Affiche tes sessions de la semaine")
-    async def mon_journal(self, interaction: discord.Interaction, semaine: int | None = None):
+    @app_commands.command(name="mon-journal", description="Affiche tes sessions")
+    async def mon_journal(
+        self,
+        interaction: discord.Interaction,
+        vague: int | None = None,
+        semaine: int | None = None,
+    ):
         async with get_connection() as db:
-            wave = await get_active_wave(db)
-            if wave is None:
-                await interaction.response.send_message("Aucune vague active.", ephemeral=True)
-                return
-
-            member = await get_member(db, str(interaction.user.id), wave["id"])
-            if member is None:
-                await interaction.response.send_message(
-                    "Tu n'es pas enregistré comme membre de la vague active.", ephemeral=True
+            try:
+                sessions, nom, label, show_wave = await _resolve_member_sessions(
+                    db, str(interaction.user.id), vague, semaine
                 )
+            except ResolutionError as e:
+                await interaction.response.send_message(str(e), ephemeral=True)
                 return
 
-            wave_start = datetime.fromisoformat(wave["date_debut"]).date()
-            target_semaine = semaine or week_number_for_date(datetime.now(TZ).date(), wave_start)
-
-            sessions = await list_by_member_week(db, member["id"], wave["id"], target_semaine)
-            texte = _format_journal(member["nom"], target_semaine, sessions)
+            texte = _format_journal(nom, label, sessions, show_wave)
             await interaction.response.send_message(texte, ephemeral=True)
 
-    @app_commands.command(
-        name="binome-journal", description="Affiche le journal de ton binôme de la semaine"
-    )
-    async def binome_journal(self, interaction: discord.Interaction, semaine: int | None = None):
+    @mon_journal.autocomplete("vague")
+    async def mon_journal_vague_autocomplete(self, interaction: discord.Interaction, current: str):
         async with get_connection() as db:
-            wave = await get_active_wave(db)
-            if wave is None:
-                await interaction.response.send_message("Aucune vague active.", ephemeral=True)
-                return
+            return await _wave_autocomplete(db, current)
+
+    @app_commands.command(
+        name="binome-journal", description="Affiche le journal de ton binôme"
+    )
+    async def binome_journal(
+        self,
+        interaction: discord.Interaction,
+        vague: int | None = None,
+        semaine: int | None = None,
+    ):
+        async with get_connection() as db:
+            if vague is not None:
+                wave = await get_wave_by_id(db, vague)
+                if wave is None:
+                    await interaction.response.send_message("Vague introuvable.", ephemeral=True)
+                    return
+            else:
+                if semaine is not None:
+                    all_waves = await list_waves(db)
+                    if len(all_waves) > 1:
+                        await interaction.response.send_message(
+                            "Plusieurs vagues existent — précise le paramètre `vague` pour lever l'ambiguïté.",
+                            ephemeral=True,
+                        )
+                        return
+                wave = await get_active_wave(db)
+                if wave is None:
+                    await interaction.response.send_message("Aucune vague active.", ephemeral=True)
+                    return
 
             member = await get_member(db, str(interaction.user.id), wave["id"])
             if member is None:
                 await interaction.response.send_message(
-                    "Tu n'es pas enregistré comme membre de la vague active.", ephemeral=True
+                    f"Tu n'es pas enregistré comme membre de la vague **{wave['nom']}**.", ephemeral=True
                 )
                 return
 
-            wave_start = datetime.fromisoformat(wave["date_debut"]).date()
-            target_semaine = semaine or week_number_for_date(datetime.now(TZ).date(), wave_start)
+            if semaine is not None:
+                target_semaine = semaine
+            else:
+                wave_start = datetime.fromisoformat(wave["date_debut"]).date()
+                target_semaine = week_number_for_date(datetime.now(TZ).date(), wave_start)
 
             partner_id = await get_partner_id(db, member["id"], wave["id"], target_semaine)
             if partner_id is None:
                 await interaction.response.send_message(
-                    f"Tu étais en solo pour la semaine {target_semaine} — pas de binôme défini.",
+                    f"Tu étais en solo pour la semaine {target_semaine} (vague {wave['nom']}) — pas de binôme défini.",
                     ephemeral=True,
                 )
                 return
 
             partner = await get_member_by_id(db, partner_id)
             sessions = await list_by_member_week(db, partner_id, wave["id"], target_semaine)
-            texte = _format_journal(partner["nom"], target_semaine, sessions)
+            texte = _format_journal(
+                partner["nom"], f"vague {wave['nom']}, semaine {target_semaine}", sessions
+            )
             await interaction.response.send_message(
                 f"(Lecture seule — journal de ton binôme)\n\n{texte}", ephemeral=True
             )
+
+    @binome_journal.autocomplete("vague")
+    async def binome_journal_vague_autocomplete(self, interaction: discord.Interaction, current: str):
+        async with get_connection() as db:
+            return await _wave_autocomplete(db, current)
 
     @app_commands.command(
         name="bilan-semaine", description="Génère le bilan hebdomadaire agrégé"
@@ -106,39 +197,31 @@ class JournalCog(commands.Cog):
         self,
         interaction: discord.Interaction,
         membre: discord.Member | None = None,
+        vague: int | None = None,
         semaine: int | None = None,
     ):
+        is_admin = any(r.name == "Admin SkillUp" for r in interaction.user.roles)
+        if membre is not None and not is_admin:
+            await interaction.response.send_message(
+                "Seuls les admins peuvent consulter le bilan d'un autre membre.",
+                ephemeral=True,
+            )
+            return
+
+        target_discord_id = str(membre.id) if membre else str(interaction.user.id)
+
         async with get_connection() as db:
-            wave = await get_active_wave(db)
-            if wave is None:
-                await interaction.response.send_message("Aucune vague active.", ephemeral=True)
-                return
-
-            is_admin = any(r.name == "Admin SkillUp" for r in interaction.user.roles)
-            if membre is not None and not is_admin:
-                await interaction.response.send_message(
-                    "Seuls les admins peuvent consulter le bilan d'un autre membre.",
-                    ephemeral=True,
+            try:
+                sessions, nom, label, show_wave = await _resolve_member_sessions(
+                    db, target_discord_id, vague, semaine
                 )
+            except ResolutionError as e:
+                await interaction.response.send_message(str(e), ephemeral=True)
                 return
-
-            target_discord_id = str(membre.id) if membre else str(interaction.user.id)
-            member = await get_member(db, target_discord_id, wave["id"])
-            if member is None:
-                await interaction.response.send_message(
-                    "Membre non enregistré dans la vague active.", ephemeral=True
-                )
-                return
-
-            wave_start = datetime.fromisoformat(wave["date_debut"]).date()
-            target_semaine = semaine or week_number_for_date(datetime.now(TZ).date(), wave_start)
-
-            sessions = await list_by_member_week(db, member["id"], wave["id"], target_semaine)
 
             nb_sessions = len(sessions)
             nb_completes = sum(1 for s in sessions if s["statut"] == "complète")
             nb_incompletes = sum(1 for s in sessions if s["statut"] == "incomplète")
-            duree_totale = None
             total_seconds = 0
             for s in sessions:
                 if s["fin"]:
@@ -152,7 +235,7 @@ class JournalCog(commands.Cog):
             blocages = [s["blocages"] for s in sessions if s["blocages"]]
 
             texte = (
-                f"**Bilan hebdomadaire — {member['nom']} — semaine {target_semaine}**\n\n"
+                f"**Bilan hebdomadaire — {nom} — {label}**\n\n"
                 f"Sessions : {nb_sessions} ({nb_completes} complètes, {nb_incompletes} incomplètes)\n"
                 f"Temps total : {duree_totale}\n"
             )
@@ -162,6 +245,11 @@ class JournalCog(commands.Cog):
                 texte += "\nAucun blocage signalé."
 
             await interaction.response.send_message(texte, ephemeral=True)
+
+    @bilan_semaine.autocomplete("vague")
+    async def bilan_semaine_vague_autocomplete(self, interaction: discord.Interaction, current: str):
+        async with get_connection() as db:
+            return await _wave_autocomplete(db, current)
 
     @app_commands.command(
         name="objectif-vague", description="Définit ou met à jour ton objectif global de vague"

@@ -58,6 +58,25 @@ async def end_session(
     await db.commit()
 
 
+async def list_by_member_ids_and_semaine(
+    db: aiosqlite.Connection, member_ids: list[int], semaine: int
+) -> list[aiosqlite.Row]:
+    """Recherche à travers toutes les vagues : sessions de ces membres pour ce numéro
+    de semaine, quelle que soit la vague à laquelle elles appartiennent."""
+    if not member_ids:
+        return []
+    db.row_factory = aiosqlite.Row
+    placeholders = ",".join("?" for _ in member_ids)
+    async with db.execute(
+        f"""SELECT sessions.*, waves.nom AS wave_nom FROM sessions
+            JOIN waves ON waves.id = sessions.wave_id
+            WHERE sessions.member_id IN ({placeholders}) AND sessions.semaine = ?
+            ORDER BY sessions.debut ASC""",
+        (*member_ids, semaine),
+    ) as cur:
+        return await cur.fetchall()
+
+
 async def list_recent_by_member(
     db: aiosqlite.Connection, member_id: int, limit: int = 25
 ) -> list[aiosqlite.Row]:

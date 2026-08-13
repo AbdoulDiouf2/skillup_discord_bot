@@ -9,6 +9,14 @@ async def get_member(db: aiosqlite.Connection, discord_id: str, wave_id: int) ->
         return await cur.fetchone()
 
 
+async def get_member_all_waves(db: aiosqlite.Connection, discord_id: str) -> list[aiosqlite.Row]:
+    db.row_factory = aiosqlite.Row
+    async with db.execute(
+        "SELECT * FROM members WHERE discord_id = ?", (discord_id,)
+    ) as cur:
+        return await cur.fetchall()
+
+
 async def get_member_by_id(db: aiosqlite.Connection, member_id: int) -> aiosqlite.Row | None:
     db.row_factory = aiosqlite.Row
     async with db.execute("SELECT * FROM members WHERE id = ?", (member_id,)) as cur:
