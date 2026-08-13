@@ -7,7 +7,7 @@ from discord.ext import commands
 from bot.config import ADMIN_ROLE_NAME, TZ
 from bot.db.database import get_connection
 from bot.db.binomes import BinomeError, define_binome, get_partner_id, list_binomes_semaine, remove_binome
-from bot.db.members import add_member, get_member, get_member_by_id
+from bot.db.members import add_member, get_member, get_member_by_id, list_by_wave
 from bot.db.waves import (
     WaveError,
     activate_wave,
@@ -158,10 +158,21 @@ class AdminCog(commands.Cog):
                 db, str(utilisateur.id), utilisateur.display_name, profil.value, wave["id"], certif_ou_projet
             )
 
-        await interaction.response.send_message(
-            f"{utilisateur.mention} ajouté à la vague **{wave['nom']}** ({profil.value}).",
-            ephemeral=True,
+        ok = await _safe_dm(
+            utilisateur,
+            f"Tu as été ajouté à la vague **{wave['nom']}** ({profil.value}). Bienvenue !\n\n"
+            f"Pense à poster ton objectif de vague dans le forum `objectifs`. "
+            f"Tu peux aussi le renseigner via `/objectif-vague` (à taper **dans un salon du "
+            f"serveur**, pas ici en message privé) — ça sert de contexte au bot pour "
+            f"générer tes bilans, en complément du forum.\n\n"
+            f"Pour démarrer ta première session : `/session-start`, également sur le serveur.",
         )
+
+        message = f"{utilisateur.mention} ajouté à la vague **{wave['nom']}** ({profil.value})."
+        if not ok:
+            message += "\n⚠️ DM non délivré (DMs probablement fermés)."
+
+        await interaction.response.send_message(message, ephemeral=True)
 
     @app_commands.command(name="membre-editer", description="[Admin] Édite un champ d'un membre")
     @app_commands.choices(
@@ -331,6 +342,53 @@ class AdminCog(commands.Cog):
         await interaction.response.send_message(
             "**Vagues**\n\n" + "\n".join(lignes), ephemeral=True
         )
+
+    @app_commands.command(
+        name="membres-lister", description="[Admin] Liste les membres d'une vague (défaut : vague active)"
+    )
+    @is_admin()
+    async def membres_lister(self, interaction: discord.Interaction, vague: int | None = None):
+        async with get_connection() as db:
+            if vague is not None:
+                wave = await get_wave_by_id(db, vague)
+                if wave is None:
+                    await interaction.response.send_message("Vague introuvable.", ephemeral=True)
+                    return
+            else:
+                wave = await get_active_wave(db)
+                if wave is None:
+                    await interaction.response.send_message("Aucune vague active.", ephemeral=True)
+                    return
+
+            membres = await list_by_wave(db, wave["id"])
+
+        if not membres:
+            await interaction.response.send_message(
+                f"Aucun membre enregistré dans la vague **{wave['nom']}**.", ephemeral=True
+            )
+            return
+
+        lignes = [
+            f"<@{m['discord_id']}> — {m['profil']}"
+            + (f" · {m['certif_ou_projet']}" if m["certif_ou_projet"] else "")
+            for m in membres
+        ]
+        await interaction.response.send_message(
+            f"**Membres — {wave['nom']}** ({len(membres)})\n\n" + "\n".join(lignes),
+            ephemeral=True,
+        )
+
+    @membres_lister.autocomplete("vague")
+    async def membres_lister_vague_autocomplete(self, interaction: discord.Interaction, current: str):
+        async with get_connection() as db:
+            waves = await list_waves(db)
+        choices = []
+        for w in waves:
+            label = f"#{w['id']} · {w['nom']} ({w['statut']})"
+            if current and current.lower() not in label.lower():
+                continue
+            choices.append(app_commands.Choice(name=label[:100], value=w["id"]))
+        return choices[:25]
 
     @app_commands.command(
         name="binomes-semaine", description="[Admin] Liste les binômes constitués pour une semaine"

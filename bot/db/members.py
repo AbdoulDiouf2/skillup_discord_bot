@@ -9,6 +9,14 @@ async def get_member(db: aiosqlite.Connection, discord_id: str, wave_id: int) ->
         return await cur.fetchone()
 
 
+async def list_by_wave(db: aiosqlite.Connection, wave_id: int) -> list[aiosqlite.Row]:
+    db.row_factory = aiosqlite.Row
+    async with db.execute(
+        "SELECT * FROM members WHERE wave_id = ? ORDER BY nom", (wave_id,)
+    ) as cur:
+        return await cur.fetchall()
+
+
 async def get_member_all_waves(db: aiosqlite.Connection, discord_id: str) -> list[aiosqlite.Row]:
     db.row_factory = aiosqlite.Row
     async with db.execute(
