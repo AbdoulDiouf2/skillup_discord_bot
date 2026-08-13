@@ -155,4 +155,6 @@ DELETE FROM members WHERE id = <id>;
 - [ ] Salons de coworking déclarés via `/salon-coworking-ajouter`
 - [ ] Vague créée via `/vague-creer` (brouillon), **activée via `/vague-activer`**, membres ajoutés via `/membre-ajouter`
 - [ ] Service systemd actif, `enable` pour survivre à un reboot
+- [ ] `/guide` posté et épinglé dans un salon de référence (ou renvoyer les membres vers `/aide` pour un résumé rapide)
+- [ ] Commandes admin masquées aux non-admins : Paramètres serveur → Intégrations → SkillUp Bot → Commandes, restreindre au rôle `Admin SkillUp` (raffinement d'affichage — la sécurité réelle est déjà assurée par `is_admin()` dans le code, cette étape évite juste que les commandes admin apparaissent dans l'autocomplétion des membres)
 - [ ] Cron de sauvegarde en place et testé une fois manuellement

@@ -1,6 +1,10 @@
 # Guide d'utilisation — Bot SkillUp
 
-Petit guide pour les 8 membres de la vague. Toutes les commandes se tapent dans un salon texte du serveur (le bot te répond en privé, seul toi vois la réponse).
+Petit guide pour les 8 membres de la vague. Toutes les commandes se tapent dans un salon texte du serveur.
+
+Pour un résumé rapide sans lire tout ce document, tape `/aide` — le bot t'affiche l'essentiel en privé.
+
+La plupart des réponses sont privées (visibles par toi seul). Exception : `/session-start` et `/session-end` postent publiquement dans le salon, comme avant le bot (ambiance collective du coworking) — les refus/erreurs restent privés.
 
 ## Le cycle d'une session
 
@@ -104,6 +108,8 @@ Pour supprimer une session saisie par erreur :
 | `/bilan-semaine` | Générer ton bilan hebdomadaire |
 | `/objectif-vague` | Définir/modifier ton objectif global |
 | `/session-corriger` | Corriger ou supprimer une session |
+| `/aide` | Résumé rapide des commandes, en privé |
+| `/guide` | Poste ce guide complet dans le salon |
 
 ## Questions fréquentes
 
