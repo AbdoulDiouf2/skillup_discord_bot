@@ -56,6 +56,17 @@ CREATE TABLE IF NOT EXISTS binomes (
     membre_b  INTEGER NOT NULL REFERENCES members(id)
 );
 
+-- Table de jonction : un membre ne peut appartenir qu'à un seul binôme par
+-- (vague, semaine) — filet de sécurité en base, même logique que RG-02 sur sessions.
+CREATE TABLE IF NOT EXISTS binome_membres (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    binome_id  INTEGER NOT NULL REFERENCES binomes(id),
+    member_id  INTEGER NOT NULL REFERENCES members(id),
+    wave_id    INTEGER NOT NULL REFERENCES waves(id),
+    semaine    INTEGER NOT NULL,
+    UNIQUE (member_id, wave_id, semaine)
+);
+
 CREATE TABLE IF NOT EXISTS coworking_channels (
     id         INTEGER PRIMARY KEY AUTOINCREMENT,
     canal_id   TEXT NOT NULL UNIQUE,

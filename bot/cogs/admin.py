@@ -6,8 +6,8 @@ from discord.ext import commands
 
 from bot.config import ADMIN_ROLE_NAME, TZ
 from bot.db.database import get_connection
-from bot.db.binomes import define_binome, list_binomes_semaine
-from bot.db.members import add_member, get_member
+from bot.db.binomes import BinomeError, define_binome, get_partner_id, list_binomes_semaine, remove_binome
+from bot.db.members import add_member, get_member, get_member_by_id
 from bot.db.waves import (
     WaveError,
     activate_wave,
@@ -32,6 +32,16 @@ def is_admin():
         return True
 
     return app_commands.check(predicate)
+
+
+async def _safe_dm(member: discord.Member, content: str) -> bool:
+    if member.bot:
+        return False
+    try:
+        await member.send(content)
+        return True
+    except discord.HTTPException:
+        return False
 
 
 class AdminCog(commands.Cog):
@@ -214,12 +224,95 @@ class AdminCog(commands.Cog):
                 )
                 return
 
-            await define_binome(db, wave["id"], semaine, ma["id"], mb["id"])
+            try:
+                await define_binome(db, wave["id"], semaine, ma["id"], mb["id"])
+            except BinomeError as e:
+                await interaction.response.send_message(str(e), ephemeral=True)
+                return
 
-        await interaction.response.send_message(
-            f"Binôme semaine {semaine} : {membre_a.mention} ↔ {membre_b.mention}",
-            ephemeral=True,
+        ok_a = await _safe_dm(
+            membre_a,
+            f"Tu es en binôme avec **{membre_b.display_name}** pour la semaine {semaine} "
+            f"de la vague **{wave['nom']}**.",
         )
+        ok_b = await _safe_dm(
+            membre_b,
+            f"Tu es en binôme avec **{membre_a.display_name}** pour la semaine {semaine} "
+            f"de la vague **{wave['nom']}**.",
+        )
+
+        message = f"Binôme semaine {semaine} : {membre_a.mention} ↔ {membre_b.mention}"
+        echecs = [m.mention for m, ok in ((membre_a, ok_a), (membre_b, ok_b)) if not ok]
+        if echecs:
+            message += f"\n⚠️ DM non délivré à : {', '.join(echecs)} (DMs probablement fermés)."
+
+        await interaction.response.send_message(message, ephemeral=True)
+
+    @app_commands.command(
+        name="binome-retirer", description="[Admin] Dissout un binôme pour une semaine"
+    )
+    @is_admin()
+    async def binome_retirer(
+        self,
+        interaction: discord.Interaction,
+        semaine: int,
+        membre_a: discord.Member,
+        membre_b: discord.Member | None = None,
+    ):
+        async with get_connection() as db:
+            wave = await get_active_wave(db)
+            if wave is None:
+                await interaction.response.send_message("Aucune vague active.", ephemeral=True)
+                return
+
+            ma = await get_member(db, str(membre_a.id), wave["id"])
+            if ma is None:
+                await interaction.response.send_message(
+                    f"{membre_a.mention} n'est pas membre de la vague active.", ephemeral=True
+                )
+                return
+
+            partner_id = await get_partner_id(db, ma["id"], wave["id"], semaine)
+            partner_member_row = await get_member_by_id(db, partner_id) if partner_id else None
+
+            removed = await remove_binome(db, wave["id"], semaine, ma["id"])
+            if not removed:
+                await interaction.response.send_message(
+                    f"{membre_a.mention} n'était dans aucun binôme pour la semaine {semaine}.",
+                    ephemeral=True,
+                )
+                return
+
+        echecs = []
+        ok_a = await _safe_dm(
+            membre_a, f"Ton binôme de la semaine {semaine} (vague **{wave['nom']}**) a été dissous."
+        )
+        if not ok_a:
+            echecs.append(membre_a.mention)
+
+        partner_discord = None
+        if partner_member_row is not None:
+            partner_discord = interaction.guild.get_member(int(partner_member_row["discord_id"]))
+            if partner_discord is None:
+                try:
+                    partner_discord = await interaction.guild.fetch_member(
+                        int(partner_member_row["discord_id"])
+                    )
+                except discord.NotFound:
+                    partner_discord = None
+            if partner_discord is not None:
+                ok_b = await _safe_dm(
+                    partner_discord,
+                    f"Ton binôme de la semaine {semaine} (vague **{wave['nom']}**) a été dissous.",
+                )
+                if not ok_b:
+                    echecs.append(partner_discord.mention)
+
+        message = f"Binôme de {membre_a.mention} dissous pour la semaine {semaine}."
+        if echecs:
+            message += f"\n⚠️ DM non délivré à : {', '.join(echecs)} (DMs probablement fermés)."
+
+        await interaction.response.send_message(message, ephemeral=True)
 
     @app_commands.command(name="vague-lister", description="[Admin] Liste toutes les vagues et leur statut")
     @is_admin()
