@@ -38,6 +38,15 @@ async def update_objectif(db: aiosqlite.Connection, member_id: int, objectif: st
     await db.commit()
 
 
+async def set_thread_objectif_id(
+    db: aiosqlite.Connection, member_id: int, thread_id: str | None
+) -> None:
+    await db.execute(
+        "UPDATE members SET thread_objectif_id = ? WHERE id = ?", (thread_id, member_id)
+    )
+    await db.commit()
+
+
 async def add_member(
     db: aiosqlite.Connection,
     discord_id: str,

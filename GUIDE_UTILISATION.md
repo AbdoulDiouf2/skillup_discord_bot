@@ -74,7 +74,14 @@ Si tu étais en solo cette semaine-là, le bot te le dit clairement — pas d'er
 
 Même logique que `/mon-journal` pour les paramètres `vague`/`semaine` optionnels.
 
-Le bot génère un récap propre (nombre de sessions, temps total, blocages) — copie-le tel quel dans le forum `objectifs` pour ta réunion de bilan.
+Par défaut, le bilan s'affiche en **aperçu privé** — rien n'est posté dans le forum. Une fois que t'es satisfait du résultat (utile si tu relances la commande plusieurs fois pour vérifier les chiffres — chaque post crée un nouveau message dans le thread, pas d'édition), poste-le pour de vrai :
+```
+/bilan-semaine poster:True
+```
+
+Ça poste le récap en réponse dans ton post du forum `objectifs` — plus besoin de copier-coller. Tu reçois une confirmation privée une fois posté.
+
+⚠️ Si tu n'as pas encore de post dans le forum `objectifs` (ou si le tien a été créé à la main avant l'arrivée du bot), le bilan reste affiché en privé même avec `poster:True`, avec une invite à faire `/objectif-vague` — ou à demander à un admin de le rattacher avec `/membre-lier-thread`.
 
 ## Ton objectif de vague — `/objectif-vague`
 
@@ -82,6 +89,8 @@ Le bot génère un récap propre (nombre de sessions, temps total, blocages) —
 ```
 /objectif-vague
 ```
+
+**La première fois**, le bot crée automatiquement ton post dans le forum `objectifs` (titre « Objectif <ton nom> », contenu = ton objectif). **Les fois suivantes**, il édite ce même post au lieu d'en créer un nouveau — inutile de repasser par le forum toi-même.
 
 ## Corriger une erreur de saisie — `/session-corriger`
 
@@ -108,7 +117,7 @@ Pour supprimer une session saisie par erreur (pas de fenêtre dans ce cas, suppr
 | `/objectif-vague` | Définir/modifier ton objectif global |
 | `/session-corriger` | Corriger ou supprimer une session |
 | `/aide` | Résumé rapide des commandes, en privé |
-| `/guide` | Poste ce guide complet dans le salon |
+| `/guide` | Affiche ce guide complet, en privé |
 
 ## Questions fréquentes
 

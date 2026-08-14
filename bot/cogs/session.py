@@ -65,7 +65,7 @@ class SessionStartModal(discord.ui.Modal, title="Démarrer une session"):
                 return
 
             channel = voice_state.channel
-            if not await is_coworking_channel(db, str(channel.id)):
+            if not await is_coworking_channel(db, str(channel.id), wave["id"]):
                 await interaction.response.send_message(
                     "Rejoins un salon de coworking avant de démarrer ta session.", ephemeral=True
                 )

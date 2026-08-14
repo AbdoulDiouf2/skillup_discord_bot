@@ -197,8 +197,9 @@ L'appartenance à un rôle est déterminée par les **rôles Discord** (un rôle
 - **Paramètres :**
   - `membre` (optionnel, admin uniquement) — défaut : soi-même
   - `semaine` (optionnel) — défaut : semaine en cours
+  - `poster` (optionnel, booléen — ajout 2026-08-14) — défaut : `false` (aperçu ephemeral, rien n'est écrit dans le forum). Passer `true` pour poster réellement (le post en thread n'est pas idempotent : chaque appel avec `poster:true` ajoute un nouveau message, sans édition ni déduplication — d'où le défaut prudent à `false`).
 - **Comportement :** agrège les sessions de la semaine (nombre de sessions, temps total, objectifs atteints/non atteints, blocages récurrents) et met en forme un récap.
-- **Sortie :** bilan structuré, copiable dans le forum `objectifs`.
+- **Sortie *(mise à jour 2026-08-14, décision #7 révisée — voir §17)* :** par défaut (`poster:false`), le bilan reste affiché en ephemeral, comme avant. Si `poster:true` et que le membre a un post objectif lié (`thread_objectif_id` renseigné), le bot **poste directement le bilan en réponse dans ce post**, sur le forum `objectifs` (confirmation ephemeral). Si `poster:true` mais aucun post n'est lié, le bilan reste affiché en ephemeral avec une invite à utiliser `/objectif-vague` ou à demander à un admin `/membre-lier-thread`.
 
 #### `/objectif-vague`
 - **Acteur :** membre
@@ -206,6 +207,7 @@ L'appartenance à un rôle est déterminée par les **rôles Discord** (un rôle
 - **Paramètres :**
   - `objectif` (obligatoire) — texte libre
 - **Comportement :** enregistre/écrase l'objectif global du membre pour la vague en cours (RG-07).
+- **Intégration forum *(ajout 2026-08-14, décision #7 révisée — voir §17)* :** au premier appel, crée automatiquement un post dans le forum `objectifs` (titre « Objectif <nom> », contenu = l'objectif), et enregistre son identifiant dans `members.thread_objectif_id`. Aux appels suivants, **édite ce même post** au lieu d'en créer un nouveau. Si le forum est introuvable sur le serveur, l'objectif reste enregistré côté bot avec un avertissement ephemeral.
 
 #### `/session-corriger` *(BF-10)*
 - **Acteur :** membre (ses sessions) / admin (toutes)
@@ -228,9 +230,21 @@ L'appartenance à un rôle est déterminée par les **rôles Discord** (un rôle
 #### `/membre-editer`
 - **Paramètres :** `@utilisateur`, `champ`, `valeur`
 
+#### `/membre-lier-thread` *(ajout 2026-08-14, décision #7 révisée — voir §17)*
+- **Paramètres :** `@utilisateur`, `lien_ou_id` (lien du post Discord ou ID brut)
+- **Comportement :** rattache manuellement un post existant du forum `objectifs` au membre (`members.thread_objectif_id`). Nécessaire pour les membres dont le post a été créé à la main **avant** l'automatisation par le bot — sans ce rattachement, `/bilan-semaine` ne trouve pas de post où répondre.
+
 #### `/binome-definir`
 - **Paramètres :** `semaine`, `@membre_a`, `@membre_b`
 - **Comportement :** associe deux membres pour la semaine indiquée (RG-06). Les membres sans binôme cette semaine-là sont considérés en solo.
+
+#### `/salon-coworking-ajouter` / `/salon-coworking-retirer` *(révisé 2026-08-14)*
+- **Paramètres :** aucun — la commande ouvre un **menu de sélection multiple** (jusqu'à 25 salons).
+- **Comportement :** les salons sont désormais **rattachés à la vague active** (`coworking_channels.wave_id` — auparavant, un salon coworking était global, valable pour toutes les vagues sans distinction). `/salon-coworking-ajouter` ne propose que les salons vocaux du serveur **pas encore ajoutés à la vague active** (pas de doublon possible à l'usage) ; `/salon-coworking-retirer` ne propose que ceux déjà liés. Les deux permettent de sélectionner plusieurs salons en un seul appel. La sélection dans le menu ne fait qu'aperçu (rien n'est encore écrit en base) — un **bouton « Valider »** confirme et déclenche l'ajout/retrait effectif.
+
+#### `/salons-coworking-lister` *(ajout 2026-08-14)*
+- **Paramètres :** `vague` (optionnel) — défaut : toutes les vagues
+- **Comportement :** liste les salons de coworking avec, pour chacun, la vague à laquelle il est rattaché et son statut (actif/inactif) — répond au manque de visibilité relevé en usage (« quel salon est rattaché à quelle vague »).
 
 ---
 
@@ -256,6 +270,7 @@ Modèle relationnel minimal, pensé pour être simple et évolutif.
 | profil | TEXT | étudiant / demandeur d'emploi / cadre / alternant / autre |
 | certif_ou_projet | TEXT | Ex. « Databricks Data Engineer Associate » |
 | objectif_vague | TEXT | Objectif global de la vague |
+| thread_objectif_id | TEXT | ID du post Discord du membre dans le forum `objectifs` (NULL si aucun post lié — ajout 2026-08-14, voir §17 décision #7) |
 | wave_id | INTEGER (FK → waves.id) | Vague de rattachement |
 
 ### Table `sessions`
@@ -292,8 +307,9 @@ Modèle relationnel minimal, pensé pour être simple et évolutif.
 | canal_id | TEXT | Identifiant Discord du salon vocal |
 | canal_nom | TEXT | Nom lisible (ex. « Coworking 1 ») |
 | actif | BOOLEAN | Salon pris en compte ou non pour les sessions |
+| wave_id | INTEGER (FK → waves.id) | Vague de rattachement (ajout 2026-08-14 — auparavant un salon était global, valable pour toutes les vagues) |
 
-> Cette table permet au bot de savoir **quels salons comptent comme coworking** (Coworking 1, Coworking 2… — le salon « Live » étant probablement à exclure). Elle est gérée par les admins et évite tout codage en dur des salons.
+> Cette table permet au bot de savoir **quels salons comptent comme coworking** (Coworking 1, Coworking 2… — le salon « Live » étant probablement à exclure). Elle est gérée par les admins et évite tout codage en dur des salons. Contrainte `UNIQUE (canal_id, wave_id)` : un même salon Discord peut être réutilisé d'une vague à l'autre, mais chaque vague a sa propre liste.
 
 **Relations principales :**
 - une vague possède plusieurs membres, sessions et binômes ;
@@ -387,7 +403,7 @@ Tous les points initialement ouverts ont été tranchés. Cette section fait off
 | 4 | Salons comptant comme coworking | **Salons Coworking uniquement**, le salon Live est exclu | RG-12 |
 | 5 | Session lancée hors vocal de coworking | **Refus de la commande + message d'avertissement explicite** | RG-12 |
 | 6 | Multi-session par jour | **Autorisé** — un membre peut enchaîner plusieurs créneaux le même jour | RG-13 |
-| 7 | Rôle du bot vis-à-vis du forum `objectifs` | Le bot produit un **texte copiable** ; il n'écrit pas automatiquement dans le forum (garde un humain dans la boucle avant publication) | §9.1 `/bilan-semaine` |
+| 7 | Rôle du bot vis-à-vis du forum `objectifs` | ~~Le bot produit un texte copiable ; il n'écrit pas automatiquement dans le forum (garde un humain dans la boucle avant publication).~~ **Révisé le 2026-08-14**, à la demande du gestionnaire du serveur prod : le bot **écrit directement dans le forum**. `/objectif-vague` crée le post au premier appel puis édite ce même post aux appels suivants (`members.thread_objectif_id`). `/bilan-semaine` poste sa réponse en reply dans ce post plutôt qu'en affichage ephemeral. Les posts créés à la main avant cette date n'ont pas de `thread_objectif_id` — rattachement ponctuel via `/membre-lier-thread` (nouvelle commande admin). | §9.1 `/objectif-vague`, `/bilan-semaine` ; §9.2 `/membre-lier-thread` ; §10 `members.thread_objectif_id` |
 | 8 | Comportement de `/binome-journal` en solo | **Message explicite** informant le membre qu'il était en solo cette semaine-là (pas d'erreur technique) | §9.1 `/binome-journal` |
 
 Le cahier des charges est considéré **complet et prêt pour l'implémentation** à ce stade.

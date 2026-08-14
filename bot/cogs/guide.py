@@ -13,8 +13,10 @@ AIDE_TEXTE_ADMIN = """
 **Commandes admin**
 • `/vague-creer`, `/vague-activer`, `/vague-cloturer`, `/vague-lister` — cycle de vie des vagues
 • `/membre-ajouter`, `/membre-editer`, `/membres-lister` — gestion des membres
+• `/membre-lier-thread` — rattache le post objectif existant d'un membre (créé à la main avant le bot)
 • `/binome-definir`, `/binome-retirer`, `/binomes-semaine` — gestion des binômes
-• `/salon-coworking-ajouter`, `/salon-coworking-retirer` — salons reconnus comme coworking
+• `/salon-coworking-ajouter`, `/salon-coworking-retirer` — salons reconnus comme coworking (multi-select + bouton Valider, par vague active)
+• `/salons-coworking-lister` — voir quel salon est rattaché à quelle vague
 • `/sessions-lister` — voir les sessions avec filtres (membre, vague, semaine, statut)
 • `/session-corriger` — corrige/supprime aussi les sessions des autres membres"""
 
@@ -29,12 +31,12 @@ Ce bot garde une trace de tes sessions de travail (coworking) pour que tu n'aies
 **Pour consulter**
 • `/mon-journal` — tes sessions de la semaine
 • `/binome-journal` — le journal de ton binôme (pour préparer son bilan)
-• `/bilan-semaine` — un récap prêt à copier dans le forum objectifs
+• `/bilan-semaine` — génère ton bilan et le poste directement dans ton post du forum `objectifs`
 
 **Autres**
-• `/objectif-vague` — définit ton objectif pour toute la vague
+• `/objectif-vague` — définit ton objectif pour toute la vague ; crée automatiquement ton post dans le forum `objectifs` (ou le met à jour si tu en as déjà un)
 • `/session-corriger` — corrige une session mal saisie
-• `/guide` — poste le guide complet dans ce salon (plus détaillé)
+• `/guide` — affiche le guide complet (en privé)
 
 Un souci ou une commande qui refuse ? Le message d'erreur explique généralement quoi faire. Sinon, demande à un admin."""
 
@@ -99,7 +101,7 @@ class GuideCog(commands.Cog):
             discord.Embed(description=chunk, color=discord.Color.blurple())
             for chunk in chunks[:10]  # Discord limite à 10 embeds par message
         ]
-        await interaction.response.send_message(embeds=embeds)
+        await interaction.response.send_message(embeds=embeds, ephemeral=True)
 
     @app_commands.command(
         name="aide", description="Résumé rapide des commandes du bot, en langage clair"

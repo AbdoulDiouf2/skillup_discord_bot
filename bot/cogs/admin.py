@@ -1,3 +1,4 @@
+import re
 from datetime import datetime
 
 import discord
@@ -7,7 +8,13 @@ from discord.ext import commands
 from bot.config import ADMIN_ROLE_NAME, TZ
 from bot.db.database import get_connection
 from bot.db.binomes import BinomeError, define_binome, get_partner_id, list_binomes_semaine, remove_binome
-from bot.db.members import add_member, get_member, get_member_by_id, list_by_wave
+from bot.db.members import (
+    add_member,
+    get_member,
+    get_member_by_id,
+    list_by_wave,
+    set_thread_objectif_id,
+)
 from bot.db.sessions import list_filtered
 from bot.db.waves import (
     WaveError,
@@ -21,6 +28,14 @@ from bot.db.waves import (
 from bot.services.weeks import week_number_for_date
 
 PROFILS = ("étudiant", "demandeur d'emploi", "cadre", "alternant", "autre")
+
+
+def _parse_thread_id(raw: str) -> int | None:
+    """Accepte un ID brut ou un lien https://discord.com/channels/<guild>/<channel>[/<message>]."""
+    digits = re.findall(r"\d{15,25}", raw)
+    if not digits:
+        return None
+    return int(digits[1]) if len(digits) >= 2 else int(digits[0])
 
 
 def is_admin():
@@ -210,6 +225,43 @@ class AdminCog(commands.Cog):
 
         await interaction.response.send_message(
             f"{utilisateur.mention} : `{champ.value}` mis à jour → {valeur}", ephemeral=True
+        )
+
+    @app_commands.command(
+        name="membre-lier-thread",
+        description="[Admin] Rattache manuellement le post objectif existant d'un membre",
+    )
+    @is_admin()
+    async def membre_lier_thread(
+        self,
+        interaction: discord.Interaction,
+        utilisateur: discord.Member,
+        lien_ou_id: str,
+    ):
+        thread_id = _parse_thread_id(lien_ou_id)
+        if thread_id is None:
+            await interaction.response.send_message(
+                "Lien ou ID de post invalide.", ephemeral=True
+            )
+            return
+
+        async with get_connection() as db:
+            wave = await get_active_wave(db)
+            if wave is None:
+                await interaction.response.send_message("Aucune vague active.", ephemeral=True)
+                return
+
+            member = await get_member(db, str(utilisateur.id), wave["id"])
+            if member is None:
+                await interaction.response.send_message(
+                    f"{utilisateur.mention} n'est pas membre de la vague active.", ephemeral=True
+                )
+                return
+
+            await set_thread_objectif_id(db, member["id"], str(thread_id))
+
+        await interaction.response.send_message(
+            f"Post objectif de {utilisateur.mention} rattaché — ID `{thread_id}`.", ephemeral=True
         )
 
     @app_commands.command(name="binome-definir", description="[Admin] Définit un binôme pour une semaine")

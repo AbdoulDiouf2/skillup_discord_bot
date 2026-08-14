@@ -101,7 +101,7 @@ async def main():
 
         # 2. Salons coworking
         for canal_id, canal_nom in CHANNELS:
-            await add_channel(db, canal_id, canal_nom)
+            await add_channel(db, canal_id, canal_nom, wave_id)
             stats["coworking_channels"] += 1
         print(f"{stats['coworking_channels']} salon(s) coworking enregistré(s).")
 
