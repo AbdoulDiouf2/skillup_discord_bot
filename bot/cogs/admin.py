@@ -5,27 +5,17 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 
-from bot.config import ADMIN_ROLE_NAME, TZ
+from bot.config import ADMIN_ROLE_NAME
 from bot.db.database import get_connection
-from bot.db.binomes import BinomeError, define_binome, get_partner_id, list_binomes_semaine, remove_binome
-from bot.db.members import (
-    add_member,
-    get_member,
-    get_member_by_id,
-    list_by_wave,
-    set_thread_objectif_id,
+from bot.db.binomes import BinomeError, define_binome, get_partner_id, remove_binome
+from bot.db.members import add_member, get_member, get_member_by_id, set_thread_objectif_id
+from bot.db.waves import WaveError, activate_wave, close_wave, create_wave, get_active_wave, list_waves
+from bot.services.admin_service import (
+    resolve_binomes_semaine,
+    resolve_members_lister,
+    resolve_sessions_lister,
 )
-from bot.db.sessions import list_filtered
-from bot.db.waves import (
-    WaveError,
-    activate_wave,
-    close_wave,
-    create_wave,
-    get_active_wave,
-    get_wave_by_id,
-    list_waves,
-)
-from bot.services.weeks import week_number_for_date
+from bot.services.errors import ResolutionError
 
 PROFILS = ("étudiant", "demandeur d'emploi", "cadre", "alternant", "autre")
 
@@ -157,15 +147,20 @@ class AdminCog(commands.Cog):
         profil: app_commands.Choice[str],
         certif_ou_projet: str | None = None,
     ):
+        # Envoi d'un DM entre le travail DB et la réponse finale — peut dépasser les
+        # 3s de délai de réponse initiale à une interaction. On défère tout de suite
+        # (délai de 15 min pour le followup) pour éviter un "Unknown interaction".
+        await interaction.response.defer(ephemeral=True)
+
         async with get_connection() as db:
             wave = await get_active_wave(db)
             if wave is None:
-                await interaction.response.send_message("Aucune vague active.", ephemeral=True)
+                await interaction.followup.send("Aucune vague active.", ephemeral=True)
                 return
 
             existing = await get_member(db, str(utilisateur.id), wave["id"])
             if existing is not None:
-                await interaction.response.send_message(
+                await interaction.followup.send(
                     f"{utilisateur.mention} est déjà membre de la vague active.", ephemeral=True
                 )
                 return
@@ -188,7 +183,7 @@ class AdminCog(commands.Cog):
         if not ok:
             message += "\n⚠️ DM non délivré (DMs probablement fermés)."
 
-        await interaction.response.send_message(message, ephemeral=True)
+        await interaction.followup.send(message, ephemeral=True)
 
     @app_commands.command(name="membre-editer", description="[Admin] Édite un champ d'un membre")
     @app_commands.choices(
@@ -273,16 +268,20 @@ class AdminCog(commands.Cog):
         membre_a: discord.Member,
         membre_b: discord.Member,
     ):
+        # Deux DM envoyés entre le travail DB et la réponse finale — même risque de
+        # dépasser les 3s de délai initial que /membre-ajouter. On défère tout de suite.
+        await interaction.response.defer(ephemeral=True)
+
         async with get_connection() as db:
             wave = await get_active_wave(db)
             if wave is None:
-                await interaction.response.send_message("Aucune vague active.", ephemeral=True)
+                await interaction.followup.send("Aucune vague active.", ephemeral=True)
                 return
 
             ma = await get_member(db, str(membre_a.id), wave["id"])
             mb = await get_member(db, str(membre_b.id), wave["id"])
             if ma is None or mb is None:
-                await interaction.response.send_message(
+                await interaction.followup.send(
                     "Les deux membres doivent être enregistrés dans la vague active.",
                     ephemeral=True,
                 )
@@ -291,7 +290,7 @@ class AdminCog(commands.Cog):
             try:
                 await define_binome(db, wave["id"], semaine, ma["id"], mb["id"])
             except BinomeError as e:
-                await interaction.response.send_message(str(e), ephemeral=True)
+                await interaction.followup.send(str(e), ephemeral=True)
                 return
 
         ok_a = await _safe_dm(
@@ -310,7 +309,7 @@ class AdminCog(commands.Cog):
         if echecs:
             message += f"\n⚠️ DM non délivré à : {', '.join(echecs)} (DMs probablement fermés)."
 
-        await interaction.response.send_message(message, ephemeral=True)
+        await interaction.followup.send(message, ephemeral=True)
 
     @app_commands.command(
         name="binome-retirer", description="[Admin] Dissout un binôme pour une semaine"
@@ -323,15 +322,19 @@ class AdminCog(commands.Cog):
         membre_a: discord.Member,
         membre_b: discord.Member | None = None,
     ):
+        # Jusqu'à deux DM envoyés entre le travail DB et la réponse finale — même
+        # risque de dépasser les 3s de délai initial. On défère tout de suite.
+        await interaction.response.defer(ephemeral=True)
+
         async with get_connection() as db:
             wave = await get_active_wave(db)
             if wave is None:
-                await interaction.response.send_message("Aucune vague active.", ephemeral=True)
+                await interaction.followup.send("Aucune vague active.", ephemeral=True)
                 return
 
             ma = await get_member(db, str(membre_a.id), wave["id"])
             if ma is None:
-                await interaction.response.send_message(
+                await interaction.followup.send(
                     f"{membre_a.mention} n'est pas membre de la vague active.", ephemeral=True
                 )
                 return
@@ -341,7 +344,7 @@ class AdminCog(commands.Cog):
 
             removed = await remove_binome(db, wave["id"], semaine, ma["id"])
             if not removed:
-                await interaction.response.send_message(
+                await interaction.followup.send(
                     f"{membre_a.mention} n'était dans aucun binôme pour la semaine {semaine}.",
                     ephemeral=True,
                 )
@@ -376,7 +379,7 @@ class AdminCog(commands.Cog):
         if echecs:
             message += f"\n⚠️ DM non délivré à : {', '.join(echecs)} (DMs probablement fermés)."
 
-        await interaction.response.send_message(message, ephemeral=True)
+        await interaction.followup.send(message, ephemeral=True)
 
     @app_commands.command(name="vague-lister", description="[Admin] Liste toutes les vagues et leur statut")
     @is_admin()
@@ -402,18 +405,11 @@ class AdminCog(commands.Cog):
     @is_admin()
     async def membres_lister(self, interaction: discord.Interaction, vague: int | None = None):
         async with get_connection() as db:
-            if vague is not None:
-                wave = await get_wave_by_id(db, vague)
-                if wave is None:
-                    await interaction.response.send_message("Vague introuvable.", ephemeral=True)
-                    return
-            else:
-                wave = await get_active_wave(db)
-                if wave is None:
-                    await interaction.response.send_message("Aucune vague active.", ephemeral=True)
-                    return
-
-            membres = await list_by_wave(db, wave["id"])
+            try:
+                wave, membres = await resolve_members_lister(db, vague)
+            except ResolutionError as e:
+                await interaction.response.send_message(str(e), ephemeral=True)
+                return
 
         if not membres:
             await interaction.response.send_message(
@@ -454,24 +450,11 @@ class AdminCog(commands.Cog):
         vague: int | None = None,
     ):
         async with get_connection() as db:
-            if vague is not None:
-                wave = await get_wave_by_id(db, vague)
-                if wave is None:
-                    await interaction.response.send_message("Vague introuvable.", ephemeral=True)
-                    return
-            else:
-                wave = await get_active_wave(db)
-                if wave is None:
-                    await interaction.response.send_message("Aucune vague active.", ephemeral=True)
-                    return
-
-            if semaine is not None:
-                target_semaine = semaine
-            else:
-                wave_start = datetime.fromisoformat(wave["date_debut"]).date()
-                target_semaine = week_number_for_date(datetime.now(TZ).date(), wave_start)
-
-            binomes = await list_binomes_semaine(db, wave["id"], target_semaine)
+            try:
+                wave, target_semaine, binomes = await resolve_binomes_semaine(db, semaine, vague)
+            except ResolutionError as e:
+                await interaction.response.send_message(str(e), ephemeral=True)
+                return
 
         if not binomes:
             await interaction.response.send_message(
@@ -516,32 +499,20 @@ class AdminCog(commands.Cog):
         statut: app_commands.Choice[str] | None = None,
     ):
         async with get_connection() as db:
-            member_id = None
-            if membre is not None:
-                if vague is not None:
-                    wave_for_member = await get_wave_by_id(db, vague)
-                else:
-                    wave_for_member = await get_active_wave(db)
-                if wave_for_member is None:
-                    await interaction.response.send_message(
-                        "Vague introuvable ou aucune vague active.", ephemeral=True
-                    )
-                    return
-                m = await get_member(db, str(membre.id), wave_for_member["id"])
-                if m is None:
-                    await interaction.response.send_message(
-                        f"{membre.mention} n'est pas membre de cette vague.", ephemeral=True
-                    )
-                    return
-                member_id = m["id"]
-
-            sessions = await list_filtered(
-                db,
-                wave_id=vague,
-                semaine=semaine,
-                member_id=member_id,
-                statut=statut.value if statut else None,
-            )
+            try:
+                sessions = await resolve_sessions_lister(
+                    db,
+                    str(membre.id) if membre else None,
+                    vague,
+                    semaine,
+                    statut.value if statut else None,
+                )
+            except ResolutionError as e:
+                message = str(e)
+                if membre is not None and "n'est pas membre de cette vague" in message:
+                    message = f"{membre.mention} n'est pas membre de cette vague."
+                await interaction.response.send_message(message, ephemeral=True)
+                return
 
         if not sessions:
             await interaction.response.send_message(

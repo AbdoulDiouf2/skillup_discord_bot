@@ -41,7 +41,7 @@ CREATE TABLE IF NOT EXISTS sessions (
     wave_id     INTEGER NOT NULL REFERENCES waves(id),
     semaine     INTEGER NOT NULL,
     date        TEXT NOT NULL,
-    creneau     TEXT NOT NULL CHECK (creneau IN ('5h-7h', '19h-21h', '21h-23h')),
+    creneau     TEXT NOT NULL,
     canal_id    TEXT,
     canal_nom   TEXT,
     debut       TEXT NOT NULL,
@@ -51,6 +51,10 @@ CREATE TABLE IF NOT EXISTS sessions (
     blocages    TEXT,
     statut      TEXT NOT NULL DEFAULT 'ouverte' CHECK (statut IN ('ouverte', 'complète', 'incomplète'))
 );
+
+-- Migration pour les bases déjà créées avant l'assouplissement du CHECK creneau
+-- (sessions hors créneaux standards conservées avec leur horaire réel, ex. backfill).
+ALTER TABLE sessions DROP CONSTRAINT IF EXISTS sessions_creneau_check;
 
 -- RG-02 : une seule session ouverte (fin IS NULL) par membre — filet de sécurité en base,
 -- en plus du contrôle applicatif fait au niveau du cog.

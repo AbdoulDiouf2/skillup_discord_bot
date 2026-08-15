@@ -4,19 +4,16 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 
-from bot.config import OBJECTIFS_FORUM_NAME, TZ
+from bot.config import OBJECTIFS_FORUM_NAME
 from bot.db.database import get_connection
-from bot.db.binomes import get_partner_id
-from bot.db.members import (
-    get_member,
-    get_member_all_waves,
-    get_member_by_id,
-    set_thread_objectif_id,
-    update_objectif,
+from bot.db.members import get_member, get_member_by_id, set_thread_objectif_id, update_objectif
+from bot.db.waves import get_active_wave, list_waves
+from bot.services.errors import ResolutionError
+from bot.services.journal_service import (
+    resolve_binome_journal,
+    resolve_member_sessions,
+    summarize_sessions,
 )
-from bot.db.sessions import list_by_member_ids_and_semaine, list_by_member_week
-from bot.db.waves import get_active_wave, get_wave_by_id, list_waves
-from bot.services.weeks import week_number_for_date
 
 
 def _format_session_line(s, show_wave: bool = False) -> str:
@@ -56,54 +53,6 @@ async def _wave_autocomplete(db, current: str) -> list[app_commands.Choice[int]]
             continue
         choices.append(app_commands.Choice(name=label[:100], value=w["id"]))
     return choices[:25]
-
-
-class ResolutionError(Exception):
-    pass
-
-
-async def _resolve_member_sessions(db, discord_id: str, vague_id: int | None, semaine: int | None):
-    """Résout (sessions, nom_affiché, label, show_wave, member) selon la règle :
-    - ni vague ni semaine -> vague active + semaine courante
-    - semaine seul (sans vague) -> recherche à travers toutes les vagues (member=None,
-      car la recherche porte sur plusieurs membership potentiellement liées à des
-      threads objectif différents — pas de post unique à cibler)
-    - vague précisée -> filtre strict sur cette vague (semaine optionnelle, défaut semaine courante de cette vague)
-    """
-    if vague_id is None and semaine is None:
-        wave = await get_active_wave(db)
-        if wave is None:
-            raise ResolutionError("Aucune vague active.")
-        member = await get_member(db, discord_id, wave["id"])
-        if member is None:
-            raise ResolutionError("Tu n'es pas enregistré comme membre de la vague active.")
-        wave_start = datetime.fromisoformat(wave["date_debut"]).date()
-        target_semaine = week_number_for_date(datetime.now(TZ).date(), wave_start)
-        sessions = await list_by_member_week(db, member["id"], wave["id"], target_semaine)
-        return sessions, member["nom"], f"vague {wave['nom']}, semaine {target_semaine}", False, member
-
-    if vague_id is None and semaine is not None:
-        members = await get_member_all_waves(db, discord_id)
-        if not members:
-            raise ResolutionError("Tu n'es enregistré dans aucune vague.")
-        member_ids = [m["id"] for m in members]
-        sessions = await list_by_member_ids_and_semaine(db, member_ids, semaine)
-        return sessions, members[0]["nom"], f"semaine {semaine} (toutes vagues)", True, None
-
-    # vague_id précisé
-    wave = await get_wave_by_id(db, vague_id)
-    if wave is None:
-        raise ResolutionError("Vague introuvable.")
-    member = await get_member(db, discord_id, wave["id"])
-    if member is None:
-        raise ResolutionError(f"Tu n'es pas enregistré comme membre de la vague **{wave['nom']}**.")
-    if semaine is not None:
-        target_semaine = semaine
-    else:
-        wave_start = datetime.fromisoformat(wave["date_debut"]).date()
-        target_semaine = week_number_for_date(datetime.now(TZ).date(), wave_start)
-    sessions = await list_by_member_week(db, member["id"], wave["id"], target_semaine)
-    return sessions, member["nom"], f"vague {wave['nom']}, semaine {target_semaine}", False, member
 
 
 async def _post_or_edit_objectif(guild: discord.Guild, db, member, objectif: str) -> str:
@@ -189,7 +138,7 @@ class JournalCog(commands.Cog):
     ):
         async with get_connection() as db:
             try:
-                sessions, nom, label, show_wave, _member = await _resolve_member_sessions(
+                sessions, nom, label, show_wave, _member = await resolve_member_sessions(
                     db, str(interaction.user.id), vague, semaine
                 )
             except ResolutionError as e:
@@ -214,48 +163,14 @@ class JournalCog(commands.Cog):
         semaine: int | None = None,
     ):
         async with get_connection() as db:
-            if vague is not None:
-                wave = await get_wave_by_id(db, vague)
-                if wave is None:
-                    await interaction.response.send_message("Vague introuvable.", ephemeral=True)
-                    return
-            else:
-                if semaine is not None:
-                    all_waves = await list_waves(db)
-                    if len(all_waves) > 1:
-                        await interaction.response.send_message(
-                            "Plusieurs vagues existent — précise le paramètre `vague` pour lever l'ambiguïté.",
-                            ephemeral=True,
-                        )
-                        return
-                wave = await get_active_wave(db)
-                if wave is None:
-                    await interaction.response.send_message("Aucune vague active.", ephemeral=True)
-                    return
-
-            member = await get_member(db, str(interaction.user.id), wave["id"])
-            if member is None:
-                await interaction.response.send_message(
-                    f"Tu n'es pas enregistré comme membre de la vague **{wave['nom']}**.", ephemeral=True
+            try:
+                partner, sessions, wave, target_semaine = await resolve_binome_journal(
+                    db, str(interaction.user.id), vague, semaine
                 )
+            except ResolutionError as e:
+                await interaction.response.send_message(str(e), ephemeral=True)
                 return
 
-            if semaine is not None:
-                target_semaine = semaine
-            else:
-                wave_start = datetime.fromisoformat(wave["date_debut"]).date()
-                target_semaine = week_number_for_date(datetime.now(TZ).date(), wave_start)
-
-            partner_id = await get_partner_id(db, member["id"], wave["id"], target_semaine)
-            if partner_id is None:
-                await interaction.response.send_message(
-                    f"Tu étais en solo pour la semaine {target_semaine} (vague {wave['nom']}) — pas de binôme défini.",
-                    ephemeral=True,
-                )
-                return
-
-            partner = await get_member_by_id(db, partner_id)
-            sessions = await list_by_member_week(db, partner_id, wave["id"], target_semaine)
             texte = _format_journal(
                 partner["nom"], f"vague {wave['nom']}, semaine {target_semaine}", sessions
             )
@@ -294,35 +209,23 @@ class JournalCog(commands.Cog):
 
         async with get_connection() as db:
             try:
-                sessions, nom, label, show_wave, member = await _resolve_member_sessions(
+                sessions, nom, label, show_wave, member = await resolve_member_sessions(
                     db, target_discord_id, vague, semaine
                 )
             except ResolutionError as e:
                 await interaction.response.send_message(str(e), ephemeral=True)
                 return
 
-            nb_sessions = len(sessions)
-            nb_completes = sum(1 for s in sessions if s["statut"] == "complète")
-            nb_incompletes = sum(1 for s in sessions if s["statut"] == "incomplète")
-            total_seconds = 0
-            for s in sessions:
-                if s["fin"]:
-                    debut = datetime.fromisoformat(s["debut"])
-                    fin = datetime.fromisoformat(s["fin"])
-                    total_seconds += (fin - debut).total_seconds()
-            heures, reste = divmod(int(total_seconds), 3600)
-            minutes = reste // 60
-            duree_totale = f"{heures}h{minutes:02d}"
-
-            blocages = [s["blocages"] for s in sessions if s["blocages"]]
+            resume = summarize_sessions(sessions)
 
             texte = (
                 f"**Bilan hebdomadaire — {nom} — {label}**\n\n"
-                f"Sessions : {nb_sessions} ({nb_completes} complètes, {nb_incompletes} incomplètes)\n"
-                f"Temps total : {duree_totale}\n"
+                f"Sessions : {resume['nb_sessions']} "
+                f"({resume['nb_completes']} complètes, {resume['nb_incompletes']} incomplètes)\n"
+                f"Temps total : {resume['duree_totale']}\n"
             )
-            if blocages:
-                texte += "\nBlocages rencontrés :\n" + "\n".join(f"- {b}" for b in blocages)
+            if resume["blocages"]:
+                texte += "\nBlocages rencontrés :\n" + "\n".join(f"- {b}" for b in resume["blocages"])
             else:
                 texte += "\nAucun blocage signalé."
 

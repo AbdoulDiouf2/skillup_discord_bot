@@ -1,0 +1,318 @@
+from datetime import date
+
+from fastapi import APIRouter, Depends, HTTPException
+
+from api import discord_client
+from api.deps import get_db, require_admin
+from api.schemas import (
+    BinomeActionResponse,
+    BinomeDefinirRequest,
+    BinomeOut,
+    BinomesResponse,
+    DiscordMemberOut,
+    DiscordMembersResponse,
+    DiscordVoiceChannelOut,
+    DiscordVoiceChannelsResponse,
+    MemberOut,
+    MembersResponse,
+    MembreAjouterRequest,
+    MembreAjouterResponse,
+    MembreEditerRequest,
+    SalonAjouterRequest,
+    SalonOut,
+    SalonsListResponse,
+    SessionCorrigerRequest,
+    SessionOut,
+    SessionsListResponse,
+    SessionSupprimerResponse,
+    VagueAdminOut,
+    VagueCreerRequest,
+    VaguesListResponse,
+)
+from bot.services.admin_service import (
+    resolve_binome_definir,
+    resolve_binome_retirer,
+    resolve_binomes_semaine,
+    resolve_membre_ajouter,
+    resolve_membre_editer,
+    resolve_members_lister,
+    resolve_salon_ajouter,
+    resolve_salon_retirer,
+    resolve_salons_lister,
+    resolve_session_corriger,
+    resolve_session_supprimer,
+    resolve_sessions_lister,
+    resolve_vague_activer,
+    resolve_vague_cloturer,
+    resolve_vague_creer,
+    resolve_vagues_lister,
+)
+from bot.services.errors import ResolutionError
+
+router = APIRouter(tags=["admin"], dependencies=[Depends(require_admin)])
+
+
+@router.get("/discord/members", response_model=DiscordMembersResponse)
+async def get_discord_members():
+    """Liste brute de tous les membres du serveur Discord (pas seulement ceux inscrits
+    à une vague) — le croisement avec les membres SkillUp se fait côté frontend."""
+    try:
+        members = await discord_client.get_guild_members()
+    except discord_client.DiscordAPIError as e:
+        raise HTTPException(503, str(e)) from e
+
+    return DiscordMembersResponse(members=[DiscordMemberOut(**m) for m in members])
+
+
+@router.get("/discord/voice-channels", response_model=DiscordVoiceChannelsResponse)
+async def get_discord_voice_channels():
+    """Liste les salons vocaux standards (type 2) du serveur Discord — sert à peupler
+    le sélecteur "Ajouter un salon" côté frontend, plutôt qu'une saisie manuelle."""
+    try:
+        channels = await discord_client.get_voice_channels()
+    except discord_client.DiscordAPIError as e:
+        raise HTTPException(503, str(e)) from e
+
+    return DiscordVoiceChannelsResponse(channels=[DiscordVoiceChannelOut(**c) for c in channels])
+
+
+@router.get("/vagues", response_model=VaguesListResponse)
+async def get_vagues(statut: str | None = None, db=Depends(get_db)):
+    """Liste toutes les vagues (pas seulement la vague active), filtrables par statut.
+    Équivalent API de /vague-lister."""
+    vagues = await resolve_vagues_lister(db, statut)
+    return VaguesListResponse(vagues=[VagueAdminOut(**dict(v)) for v in vagues])
+
+
+@router.post("/vagues", response_model=VagueAdminOut)
+async def post_vague(body: VagueCreerRequest, db=Depends(get_db)):
+    """Crée une vague en brouillon. Équivalent API de /vague-creer — jamais activée
+    automatiquement (cf. RG-14, `/vague-activer` séparé)."""
+    try:
+        debut = date.fromisoformat(body.date_debut)
+        fin = date.fromisoformat(body.date_fin)
+    except ValueError as e:
+        raise HTTPException(400, "Format de date invalide (attendu AAAA-MM-JJ).") from e
+
+    wave = await resolve_vague_creer(db, body.nom, debut, fin)
+    return VagueAdminOut(**dict(wave))
+
+
+@router.patch("/vagues/{vague_id}/activer", response_model=VagueAdminOut)
+async def patch_vague_activer(vague_id: int, db=Depends(get_db)):
+    """Active une vague en brouillon. Équivalent API de /vague-activer."""
+    try:
+        wave = await resolve_vague_activer(db, vague_id)
+    except ResolutionError as e:
+        raise HTTPException(404, str(e)) from e
+    return VagueAdminOut(**dict(wave))
+
+
+@router.patch("/vagues/cloturer", response_model=VagueAdminOut)
+async def patch_vague_cloturer(vague_id: int | None = None, db=Depends(get_db)):
+    """Clôture une vague (par défaut la vague active). Équivalent API de /vague-cloturer."""
+    try:
+        wave = await resolve_vague_cloturer(db, vague_id)
+    except ResolutionError as e:
+        raise HTTPException(404, str(e)) from e
+    return VagueAdminOut(**dict(wave))
+
+
+@router.get("/salons", response_model=SalonsListResponse)
+async def get_salons(vague: int | None = None, actif: bool = False, db=Depends(get_db)):
+    """Liste les salons de coworking. Équivalent API de /salons-coworking-lister —
+    sans `vague`, liste TOUTES les vagues (comportement Discord d'origine)."""
+    salons = await resolve_salons_lister(db, vague, actif)
+    return SalonsListResponse(salons=[SalonOut(**dict(s)) for s in salons])
+
+
+@router.post("/salons", response_model=SalonOut)
+async def post_salon(body: SalonAjouterRequest, db=Depends(get_db)):
+    """Ajoute (ou réactive) un salon de coworking pour une vague. Équivalent API de
+    /salon-coworking-ajouter."""
+    wave = await resolve_salon_ajouter(db, body.vague, body.canal_id, body.canal_nom)
+    return SalonOut(canal_id=body.canal_id, canal_nom=body.canal_nom, actif=True, wave_nom=wave["nom"])
+
+
+@router.delete("/salons")
+async def delete_salon(canal_id: str, vague: int | None = None, db=Depends(get_db)):
+    """Désactive un salon de coworking (soft-delete). Équivalent API de
+    /salon-coworking-retirer."""
+    wave = await resolve_salon_retirer(db, vague, canal_id)
+    return {"canal_id": canal_id, "wave_nom": wave["nom"], "message": "Salon retiré."}
+
+
+@router.get("/members", response_model=MembersResponse)
+async def get_members(vague: int | None = None, db=Depends(get_db)):
+    try:
+        wave, membres = await resolve_members_lister(db, vague)
+    except ResolutionError as e:
+        raise HTTPException(404, str(e)) from e
+
+    return MembersResponse(
+        wave_id=wave["id"],
+        wave_nom=wave["nom"],
+        membres=[MemberOut(**dict(m)) for m in membres],
+    )
+
+
+@router.post("/members", response_model=MembreAjouterResponse)
+async def post_member(body: MembreAjouterRequest, db=Depends(get_db)):
+    """Ajoute un membre à une vague. Équivalent API de /membre-ajouter — envoie un DM
+    de bienvenue (best-effort, jamais fatal)."""
+    try:
+        wave, membre = await resolve_membre_ajouter(
+            db, body.vague, body.discord_id, body.nom, body.profil, body.certif_ou_projet
+        )
+    except ResolutionError as e:
+        raise HTTPException(404, str(e)) from e
+
+    dm_ok = await discord_client.send_dm(
+        body.discord_id,
+        f"Tu as été ajouté à la vague **{wave['nom']}** ({body.profil}). Bienvenue !\n\n"
+        f"Pense à poster ton objectif de vague dans le forum `objectifs`, ou renseigne-le via "
+        f"`/objectif-vague` (dans un salon du serveur). Pour démarrer ta première session : "
+        f"`/session-start`, également sur le serveur.",
+    )
+
+    return MembreAjouterResponse(
+        id=membre["id"],
+        discord_id=membre["discord_id"],
+        nom=membre["nom"],
+        profil=membre["profil"],
+        certif_ou_projet=membre["certif_ou_projet"],
+        dm_ok=dm_ok,
+    )
+
+
+@router.patch("/members/{discord_id}", response_model=MemberOut)
+async def patch_member(discord_id: str, body: MembreEditerRequest, db=Depends(get_db)):
+    """Édite un champ d'un membre existant. Équivalent API de /membre-editer."""
+    try:
+        _wave, membre = await resolve_membre_editer(db, body.vague, discord_id, body.champ, body.valeur)
+    except ResolutionError as e:
+        raise HTTPException(404, str(e)) from e
+
+    return MemberOut(**dict(membre))
+
+
+@router.get("/sessions", response_model=SessionsListResponse)
+async def get_sessions(
+    membre: str | None = None,
+    vague: int | None = None,
+    semaine: int | None = None,
+    statut: str | None = None,
+    db=Depends(get_db),
+):
+    try:
+        sessions = await resolve_sessions_lister(db, membre, vague, semaine, statut)
+    except ResolutionError as e:
+        raise HTTPException(404, str(e)) from e
+
+    return SessionsListResponse(sessions=[SessionOut(**dict(s)) for s in sessions])
+
+
+@router.get("/binomes", response_model=BinomesResponse)
+async def get_binomes(semaine: int | None = None, vague: int | None = None, db=Depends(get_db)):
+    try:
+        wave, target_semaine, binomes = await resolve_binomes_semaine(db, semaine, vague)
+    except ResolutionError as e:
+        raise HTTPException(404, str(e)) from e
+
+    return BinomesResponse(
+        wave_id=wave["id"],
+        wave_nom=wave["nom"],
+        semaine=target_semaine,
+        binomes=[BinomeOut(**dict(b)) for b in binomes],
+    )
+
+
+@router.post("/binomes", response_model=BinomeActionResponse)
+async def post_binome(body: BinomeDefinirRequest, db=Depends(get_db)):
+    """Définit un binôme. Équivalent API de /binome-definir — envoie un DM aux deux
+    membres (best-effort, jamais fatal) pour rester cohérent avec le comportement
+    Discord existant."""
+    try:
+        wave, membre_a, membre_b = await resolve_binome_definir(
+            db, body.vague, body.semaine, body.membre_a_discord_id, body.membre_b_discord_id
+        )
+    except ResolutionError as e:
+        raise HTTPException(404, str(e)) from e
+
+    dm_echecs = []
+    ok_a = await discord_client.send_dm(
+        membre_a["discord_id"],
+        f"Tu es en binôme avec **{membre_b['nom']}** pour la semaine {body.semaine} "
+        f"de la vague **{wave['nom']}**.",
+    )
+    if not ok_a:
+        dm_echecs.append(membre_a["nom"])
+
+    ok_b = await discord_client.send_dm(
+        membre_b["discord_id"],
+        f"Tu es en binôme avec **{membre_a['nom']}** pour la semaine {body.semaine} "
+        f"de la vague **{wave['nom']}**.",
+    )
+    if not ok_b:
+        dm_echecs.append(membre_b["nom"])
+
+    message = f"Binôme semaine {body.semaine} : {membre_a['nom']} ↔ {membre_b['nom']}"
+    return BinomeActionResponse(message=message, dm_echecs=dm_echecs)
+
+
+@router.delete("/binomes", response_model=BinomeActionResponse)
+async def delete_binome(
+    semaine: int,
+    membre_discord_id: str,
+    vague: int | None = None,
+    db=Depends(get_db),
+):
+    """Dissout le binôme d'un membre. Équivalent API de /binome-retirer — prévient
+    par DM le membre et son partenaire (best-effort), comme côté Discord."""
+    try:
+        wave, membre, partenaire = await resolve_binome_retirer(db, vague, semaine, membre_discord_id)
+    except ResolutionError as e:
+        raise HTTPException(404, str(e)) from e
+
+    dm_echecs = []
+    ok = await discord_client.send_dm(
+        membre["discord_id"],
+        f"Ton binôme de la semaine {semaine} (vague **{wave['nom']}**) a été dissous.",
+    )
+    if not ok:
+        dm_echecs.append(membre["nom"])
+
+    if partenaire is not None:
+        ok_partenaire = await discord_client.send_dm(
+            partenaire["discord_id"],
+            f"Ton binôme de la semaine {semaine} (vague **{wave['nom']}**) a été dissous.",
+        )
+        if not ok_partenaire:
+            dm_echecs.append(partenaire["nom"])
+
+    message = f"Binôme de {membre['nom']} dissous pour la semaine {semaine}."
+    return BinomeActionResponse(message=message, dm_echecs=dm_echecs)
+
+
+@router.patch("/sessions/{session_id}", response_model=SessionOut)
+async def patch_session(session_id: int, body: SessionCorrigerRequest, db=Depends(get_db)):
+    """Corrige un champ (objectif, bilan, blocages, creneau) d'une session existante.
+    Équivalent API de `/session-corriger` côté admin — pas de vérification de
+    propriétaire, un admin peut corriger n'importe quelle session."""
+    try:
+        session = await resolve_session_corriger(db, session_id, body.champ, body.valeur)
+    except ResolutionError as e:
+        raise HTTPException(404, str(e)) from e
+
+    return SessionOut(**dict(session))
+
+
+@router.delete("/sessions/{session_id}", response_model=SessionSupprimerResponse)
+async def delete_session_endpoint(session_id: int, db=Depends(get_db)):
+    """Supprime une session. Équivalent API de `/session-corriger champ:suppression`."""
+    try:
+        await resolve_session_supprimer(db, session_id)
+    except ResolutionError as e:
+        raise HTTPException(404, str(e)) from e
+
+    return SessionSupprimerResponse(id=session_id, message=f"Session {session_id} supprimée.")

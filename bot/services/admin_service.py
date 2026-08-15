@@ -1,0 +1,245 @@
+from datetime import date, datetime
+
+from bot.config import TZ
+from bot.db.binomes import BinomeError, define_binome, get_partner_id, list_binomes_semaine, remove_binome
+from bot.db.coworking_channels import add_channel, list_channels, remove_channel
+from bot.db.members import add_member, get_member, get_member_by_id, list_by_wave
+from bot.db.members import update_field as update_member_field
+from bot.db.sessions import delete_session, get_by_id, list_filtered, update_field
+from bot.db.waves import (
+    WaveError,
+    activate_wave,
+    close_wave,
+    create_wave,
+    get_active_wave,
+    get_wave_by_id,
+    list_waves,
+)
+from bot.services.errors import ResolutionError
+from bot.services.weeks import week_number_for_date
+
+# Mêmes champs éditables que la commande Discord /session-corriger (hors "suppression",
+# qui est un domaine d'action séparé — cf. resolve_session_supprimer).
+SESSION_CHAMPS_EDITABLES = ("objectif", "bilan", "blocages", "creneau")
+
+# Mêmes valeurs que PROFILS côté bot (bot/cogs/admin.py) — dupliqué ici pour ne pas faire
+# dépendre l'API du module cogs (qui importe discord.py, absent du process API).
+MEMBRE_PROFILS = ("étudiant", "demandeur d'emploi", "cadre", "alternant", "autre")
+
+# Mêmes champs éditables que la commande Discord /membre-editer.
+MEMBRE_CHAMPS_EDITABLES = ("nom", "profil", "certif_ou_projet", "objectif_vague")
+
+
+async def _resolve_wave(db, vague_id: int | None):
+    if vague_id is not None:
+        wave = await get_wave_by_id(db, vague_id)
+        if wave is None:
+            raise ResolutionError("Vague introuvable.")
+        return wave
+    wave = await get_active_wave(db)
+    if wave is None:
+        raise ResolutionError("Aucune vague active.")
+    return wave
+
+
+async def resolve_members_lister(db, vague_id: int | None):
+    """Retourne (wave, membres). Mêmes règles que /membres-lister :
+    vague donnée -> cette vague ; sinon -> vague active."""
+    wave = await _resolve_wave(db, vague_id)
+    membres = await list_by_wave(db, wave["id"])
+    return wave, membres
+
+
+async def resolve_sessions_lister(
+    db,
+    membre_discord_id: str | None,
+    vague_id: int | None,
+    semaine: int | None,
+    statut: str | None,
+) -> list:
+    """Mêmes règles que /sessions-lister ET que resolve_members_lister : vague donnée
+    -> cette vague ; sinon -> vague active (ResolutionError si aucune). Jamais de
+    filtrage "toutes vagues" silencieux. Si `membre_discord_id` est fourni, résout
+    aussi son member_id dans cette même vague, erreur s'il n'en est pas membre."""
+    wave = await _resolve_wave(db, vague_id)
+
+    member_id = None
+    if membre_discord_id is not None:
+        m = await get_member(db, membre_discord_id, wave["id"])
+        if m is None:
+            raise ResolutionError(f"Le membre `{membre_discord_id}` n'est pas membre de cette vague.")
+        member_id = m["id"]
+
+    return await list_filtered(
+        db, wave_id=wave["id"], semaine=semaine, member_id=member_id, statut=statut
+    )
+
+
+async def resolve_binomes_semaine(db, semaine: int | None, vague_id: int | None):
+    """Retourne (wave, target_semaine, binomes). Mêmes règles que /binomes-semaine."""
+    wave = await _resolve_wave(db, vague_id)
+    if semaine is not None:
+        target_semaine = semaine
+    else:
+        wave_start = datetime.fromisoformat(wave["date_debut"]).date()
+        target_semaine = week_number_for_date(datetime.now(TZ).date(), wave_start)
+    binomes = await list_binomes_semaine(db, wave["id"], target_semaine)
+    return wave, target_semaine, binomes
+
+
+async def resolve_session_corriger(db, session_id: int, champ: str, valeur: str):
+    """Corrige un champ d'une session existante. Mêmes règles que /session-corriger
+    côté admin (pas de vérification de propriétaire — l'admin peut corriger n'importe
+    quelle session)."""
+    if champ not in SESSION_CHAMPS_EDITABLES:
+        raise ResolutionError(
+            f"Champ invalide : `{champ}`. Valeurs possibles : {', '.join(SESSION_CHAMPS_EDITABLES)}."
+        )
+    session = await get_by_id(db, session_id)
+    if session is None:
+        raise ResolutionError(f"Session `{session_id}` introuvable.")
+
+    await update_field(db, session_id, champ, valeur)
+    return await get_by_id(db, session_id)
+
+
+async def resolve_membre_ajouter(
+    db, vague_id: int | None, discord_id: str, nom: str, profil: str, certif_ou_projet: str | None
+):
+    """Ajoute un membre à une vague. Mêmes règles que /membre-ajouter : refuse si déjà
+    membre de cette vague, valide le profil contre la liste fermée. Retourne (wave, membre)."""
+    if profil not in MEMBRE_PROFILS:
+        raise ResolutionError(
+            f"Profil invalide : `{profil}`. Valeurs possibles : {', '.join(MEMBRE_PROFILS)}."
+        )
+    wave = await _resolve_wave(db, vague_id)
+
+    existing = await get_member(db, discord_id, wave["id"])
+    if existing is not None:
+        raise ResolutionError(f"Ce membre est déjà dans la vague **{wave['nom']}**.")
+
+    member_id = await add_member(db, discord_id, nom, profil, wave["id"], certif_ou_projet)
+    return wave, await get_member_by_id(db, member_id)
+
+
+async def resolve_membre_editer(db, vague_id: int | None, discord_id: str, champ: str, valeur: str):
+    """Édite un champ d'un membre existant. Mêmes règles que /membre-editer. Retourne
+    (wave, membre)."""
+    if champ not in MEMBRE_CHAMPS_EDITABLES:
+        raise ResolutionError(
+            f"Champ invalide : `{champ}`. Valeurs possibles : {', '.join(MEMBRE_CHAMPS_EDITABLES)}."
+        )
+    wave = await _resolve_wave(db, vague_id)
+
+    membre = await get_member(db, discord_id, wave["id"])
+    if membre is None:
+        raise ResolutionError(f"Ce membre n'est pas enregistré dans la vague **{wave['nom']}**.")
+
+    await update_member_field(db, membre["id"], champ, valeur)
+    return wave, await get_member_by_id(db, membre["id"])
+
+
+async def resolve_binome_definir(
+    db, vague_id: int | None, semaine: int, discord_id_a: str, discord_id_b: str
+):
+    """Définit un binôme pour (vague, semaine). Mêmes règles que /binome-definir :
+    les deux membres doivent être enregistrés dans la vague résolue (vague donnée,
+    sinon vague active). Retourne (wave, membre_a, membre_b)."""
+    wave = await _resolve_wave(db, vague_id)
+
+    membre_a = await get_member(db, discord_id_a, wave["id"])
+    membre_b = await get_member(db, discord_id_b, wave["id"])
+    if membre_a is None or membre_b is None:
+        raise ResolutionError(
+            f"Les deux membres doivent être enregistrés dans la vague **{wave['nom']}**."
+        )
+
+    try:
+        await define_binome(db, wave["id"], semaine, membre_a["id"], membre_b["id"])
+    except BinomeError as e:
+        raise ResolutionError(str(e)) from e
+
+    return wave, membre_a, membre_b
+
+
+async def resolve_binome_retirer(db, vague_id: int | None, semaine: int, discord_id: str):
+    """Dissout le binôme d'un membre pour (vague, semaine). Mêmes règles que
+    /binome-retirer. Retourne (wave, membre, partenaire_ou_None) — le partenaire est
+    résolu *avant* suppression pour pouvoir le prévenir par DM."""
+    wave = await _resolve_wave(db, vague_id)
+
+    membre = await get_member(db, discord_id, wave["id"])
+    if membre is None:
+        raise ResolutionError(f"Ce membre n'est pas enregistré dans la vague **{wave['nom']}**.")
+
+    partner_id = await get_partner_id(db, membre["id"], wave["id"], semaine)
+    partenaire = await get_member_by_id(db, partner_id) if partner_id else None
+
+    removed = await remove_binome(db, wave["id"], semaine, membre["id"])
+    if not removed:
+        raise ResolutionError(f"Ce membre n'était dans aucun binôme pour la semaine {semaine}.")
+
+    return wave, membre, partenaire
+
+
+async def resolve_vague_creer(db, nom: str, date_debut: date, date_fin: date):
+    """Crée une vague en brouillon. Mêmes règles que /vague-creer (jamais activée
+    automatiquement — cf. RG-14)."""
+    wave_id = await create_wave(db, nom, date_debut, date_fin)
+    return await get_wave_by_id(db, wave_id)
+
+
+async def resolve_vague_activer(db, vague_id: int):
+    """Active une vague en brouillon. Mêmes règles que /vague-activer (refuse si une
+    autre vague est déjà active, ou si la vague n'est pas en brouillon)."""
+    try:
+        return await activate_wave(db, vague_id)
+    except WaveError as e:
+        raise ResolutionError(str(e)) from e
+
+
+async def resolve_vague_cloturer(db, vague_id: int | None):
+    """Clôture une vague (par défaut la vague active). Mêmes règles que /vague-cloturer."""
+    try:
+        return await close_wave(db, vague_id)
+    except WaveError as e:
+        raise ResolutionError(str(e)) from e
+
+
+async def resolve_vagues_lister(db, statut: str | None):
+    """Liste toutes les vagues, filtrables par statut. Mêmes règles que /vague-lister."""
+    return await list_waves(db, statut)
+
+
+async def resolve_salon_ajouter(db, vague_id: int | None, canal_id: str, canal_nom: str):
+    """Ajoute (ou réactive) un salon de coworking pour une vague. Mêmes règles que
+    /salon-coworking-ajouter (idempotent : `add_channel` fait un upsert)."""
+    wave = await _resolve_wave(db, vague_id)
+    await add_channel(db, canal_id, canal_nom, wave["id"])
+    return wave
+
+
+async def resolve_salon_retirer(db, vague_id: int | None, canal_id: str):
+    """Désactive un salon de coworking pour une vague. Mêmes règles que
+    /salon-coworking-retirer (soft-delete : `actif = FALSE`, pas une suppression)."""
+    wave = await _resolve_wave(db, vague_id)
+    await remove_channel(db, canal_id, wave["id"])
+    return wave
+
+
+async def resolve_salons_lister(db, vague_id: int | None, actif_seulement: bool):
+    """Liste les salons de coworking. Mêmes règles que /salons-coworking-lister —
+    contrairement aux autres domaines, `vague_id=None` liste TOUTES les vagues (pas
+    seulement la vague active), pour rester cohérent avec le comportement Discord."""
+    return await list_channels(db, vague_id, actif_seulement)
+
+
+async def resolve_session_supprimer(db, session_id: int):
+    """Supprime une session. Retourne la session telle qu'elle était avant suppression
+    (pour que l'appelant puisse en afficher un récapitulatif)."""
+    session = await get_by_id(db, session_id)
+    if session is None:
+        raise ResolutionError(f"Session `{session_id}` introuvable.")
+
+    await delete_session(db, session_id)
+    return session
