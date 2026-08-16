@@ -52,6 +52,7 @@ class MemberOut(BaseModel):
     nom: str
     profil: str
     certif_ou_projet: str | None
+    objectif_vague: str | None = None
 
 
 class MembersResponse(BaseModel):
@@ -183,4 +184,13 @@ class SalonsListResponse(BaseModel):
 class SalonAjouterRequest(BaseModel):
     canal_id: str
     canal_nom: str
+    vague: int | None = None
+
+
+class ObjectifVagueRequest(BaseModel):
+    valeur: str
+
+
+class MembreLierThreadRequest(BaseModel):
+    lien_ou_id: str
     vague: int | None = None

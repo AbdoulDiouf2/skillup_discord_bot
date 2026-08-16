@@ -1,9 +1,10 @@
+import re
 from datetime import date, datetime
 
 from bot.config import TZ
 from bot.db.binomes import BinomeError, define_binome, get_partner_id, list_binomes_semaine, remove_binome
 from bot.db.coworking_channels import add_channel, list_channels, remove_channel
-from bot.db.members import add_member, get_member, get_member_by_id, list_by_wave
+from bot.db.members import add_member, get_member, get_member_by_id, list_by_wave, set_thread_objectif_id
 from bot.db.members import update_field as update_member_field
 from bot.db.sessions import delete_session, get_by_id, list_filtered, update_field
 from bot.db.waves import (
@@ -237,6 +238,29 @@ async def resolve_salons_lister(db, vague_id: int | None, actif_seulement: bool)
     contrairement aux autres domaines, `vague_id=None` liste TOUTES les vagues (pas
     seulement la vague active), pour rester cohérent avec le comportement Discord."""
     return await list_channels(db, vague_id, actif_seulement)
+
+
+def parse_thread_id(raw: str) -> int | None:
+    """Accepte un ID brut ou un lien https://discord.com/channels/<guild>/<channel>[/<message>].
+    Copie de bot/cogs/admin.py::_parse_thread_id — fonction pure, dupliquée ici plutôt
+    qu'importée du cog pour ne pas faire dépendre le service layer de discord.py."""
+    digits = re.findall(r"\d{15,25}", raw)
+    if not digits:
+        return None
+    return int(digits[1]) if len(digits) >= 2 else int(digits[0])
+
+
+async def resolve_membre_lier_thread(db, vague_id: int | None, discord_id: str, lien_ou_id: str):
+    """Rattache manuellement un thread objectif existant. Mêmes règles que /membre-lier-thread."""
+    thread_id = parse_thread_id(lien_ou_id)
+    if thread_id is None:
+        raise ResolutionError("Lien ou ID de post invalide.")
+    wave = await _resolve_wave(db, vague_id)
+    membre = await get_member(db, discord_id, wave["id"])
+    if membre is None:
+        raise ResolutionError(f"Ce membre n'est pas enregistré dans la vague **{wave['nom']}**.")
+    await set_thread_objectif_id(db, membre["id"], str(thread_id))
+    return wave, await get_member_by_id(db, membre["id"])
 
 
 async def resolve_session_supprimer(db, session_id: int):

@@ -18,6 +18,7 @@ from api.schemas import (
     MembreAjouterRequest,
     MembreAjouterResponse,
     MembreEditerRequest,
+    MembreLierThreadRequest,
     SalonAjouterRequest,
     SalonOut,
     SalonsListResponse,
@@ -35,6 +36,7 @@ from bot.services.admin_service import (
     resolve_binomes_semaine,
     resolve_membre_ajouter,
     resolve_membre_editer,
+    resolve_membre_lier_thread,
     resolve_members_lister,
     resolve_salon_ajouter,
     resolve_salon_retirer,
@@ -193,6 +195,18 @@ async def patch_member(discord_id: str, body: MembreEditerRequest, db=Depends(ge
     except ResolutionError as e:
         raise HTTPException(404, str(e)) from e
 
+    return MemberOut(**dict(membre))
+
+
+@router.patch("/members/{discord_id}/thread-objectif", response_model=MemberOut)
+async def patch_membre_lier_thread(discord_id: str, body: MembreLierThreadRequest, db=Depends(get_db)):
+    """Rattache manuellement le post objectif existant d'un membre. Équivalent API de
+    /membre-lier-thread (rattrapage manuel ponctuel — cas des membres dont le post a
+    été créé à la main avant l'automatisation `/objectif-vague`)."""
+    try:
+        _wave, membre = await resolve_membre_lier_thread(db, body.vague, discord_id, body.lien_ou_id)
+    except ResolutionError as e:
+        raise HTTPException(404, str(e)) from e
     return MemberOut(**dict(membre))
 
 
