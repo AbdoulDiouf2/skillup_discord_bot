@@ -1,0 +1,14 @@
+services:
+  skillup-bot:
+    build: .
+    image: skillup-bot:latest
+    container_name: skillup-bot
+    restart: unless-stopped
+    command: python -m bot.main
+    env_file: .env
+    networks:
+      - prod-net
+
+networks:
+  prod-net:
+    external: true
