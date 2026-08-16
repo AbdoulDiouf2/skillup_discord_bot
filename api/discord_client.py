@@ -1,3 +1,4 @@
+import asyncio
 import time
 
 import httpx
@@ -9,6 +10,9 @@ ROLES_CACHE_TTL_SECONDS = 300
 MEMBERS_CACHE_TTL_SECONDS = 300
 VOICE_CHANNELS_CACHE_TTL_SECONDS = 300
 DISCORD_CHANNEL_TYPE_VOICE = 2
+# Au-delà de ce délai, un retry ferait plus de mal (latence perçue) que de bien —
+# on laisse remonter l'erreur telle quelle plutôt que de faire attendre l'appelant.
+RETRY_AFTER_THRESHOLD_SECONDS = 2.0
 
 _http: httpx.AsyncClient | None = None
 _roles_cache: dict[str, str] | None = None
@@ -54,6 +58,39 @@ def _client() -> httpx.AsyncClient:
     return _http
 
 
+async def _get_with_retry(
+    url: str, params: dict | None, context: str, allow_404: bool = False
+) -> httpx.Response:
+    """GET avec un seul retry si Discord répond 429 avec un `retry_after` court (<
+    RETRY_AFTER_THRESHOLD_SECONDS) — une panne transitoire de rate limit ne doit pas
+    remonter en erreur si l'attente est négligeable. Au-delà du seuil, ou si le retry
+    échoue aussi, lève `DiscordAPIError` — jamais de boucle, un seul essai de plus.
+    `allow_404` : renvoie la réponse telle quelle sur 404 au lieu de lever (cas
+    `is_admin`, où 404 = "pas membre de la guild", pas une panne)."""
+    for attempt in range(2):
+        try:
+            resp = await _client().get(url, params=params)
+        except httpx.HTTPError as e:
+            raise DiscordAPIError(f"Échec de connexion à l'API Discord ({context}) : {e}") from e
+
+        if allow_404 and resp.status_code == 404:
+            return resp
+
+        if resp.status_code == 429:
+            retry_after = resp.json().get("retry_after")
+            if attempt == 0 and isinstance(retry_after, (int, float)) and retry_after < RETRY_AFTER_THRESHOLD_SECONDS:
+                await asyncio.sleep(retry_after)
+                continue
+            raise DiscordAPIError(f"Rate limit Discord ({context}) — retry_after={retry_after}s")
+
+        if resp.status_code >= 400:
+            raise DiscordAPIError(f"Erreur API Discord ({context}) : {resp.status_code} {resp.text}")
+
+        return resp
+
+    raise DiscordAPIError(f"Rate limit Discord ({context}) persistant après retry.")
+
+
 async def _get_role_id_to_name() -> dict[str, str]:
     """Retourne {role_id: role_name} pour la guild, avec cache mémoire (TTL 300s) —
     les rôles changent rarement, contrairement à l'appartenance d'un membre à un rôle."""
@@ -62,17 +99,7 @@ async def _get_role_id_to_name() -> dict[str, str]:
     if _roles_cache is not None and (time.monotonic() - _roles_cache_at) < ROLES_CACHE_TTL_SECONDS:
         return _roles_cache
 
-    try:
-        resp = await _client().get(f"/guilds/{GUILD_ID}/roles")
-    except httpx.HTTPError as e:
-        raise DiscordAPIError(f"Échec de connexion à l'API Discord (rôles) : {e}") from e
-
-    if resp.status_code == 429:
-        retry_after = resp.json().get("retry_after", "?")
-        raise DiscordAPIError(f"Rate limit Discord (rôles) — retry_after={retry_after}s")
-    if resp.status_code >= 400:
-        raise DiscordAPIError(f"Erreur API Discord (rôles) : {resp.status_code} {resp.text}")
-
+    resp = await _get_with_retry(f"/guilds/{GUILD_ID}/roles", None, "rôles")
     roles = resp.json()
     _roles_cache = {r["id"]: r["name"] for r in roles}
     _roles_cache_at = time.monotonic()
@@ -88,18 +115,11 @@ async def is_admin(discord_id: str) -> bool:
     if not admin_role_ids:
         return False
 
-    try:
-        resp = await _client().get(f"/guilds/{GUILD_ID}/members/{discord_id}")
-    except httpx.HTTPError as e:
-        raise DiscordAPIError(f"Échec de connexion à l'API Discord (membre) : {e}") from e
-
+    resp = await _get_with_retry(
+        f"/guilds/{GUILD_ID}/members/{discord_id}", None, "membre", allow_404=True
+    )
     if resp.status_code == 404:
         return False
-    if resp.status_code == 429:
-        retry_after = resp.json().get("retry_after", "?")
-        raise DiscordAPIError(f"Rate limit Discord (membre) — retry_after={retry_after}s")
-    if resp.status_code >= 400:
-        raise DiscordAPIError(f"Erreur API Discord (membre) : {resp.status_code} {resp.text}")
 
     member = resp.json()
     member_role_ids = set(member.get("roles", []))
@@ -123,17 +143,7 @@ async def get_guild_members() -> list[dict]:
         if after is not None:
             params["after"] = after
 
-        try:
-            resp = await _client().get(f"/guilds/{GUILD_ID}/members", params=params)
-        except httpx.HTTPError as e:
-            raise DiscordAPIError(f"Échec de connexion à l'API Discord (membres) : {e}") from e
-
-        if resp.status_code == 429:
-            retry_after = resp.json().get("retry_after", "?")
-            raise DiscordAPIError(f"Rate limit Discord (membres) — retry_after={retry_after}s")
-        if resp.status_code >= 400:
-            raise DiscordAPIError(f"Erreur API Discord (membres) : {resp.status_code} {resp.text}")
-
+        resp = await _get_with_retry(f"/guilds/{GUILD_ID}/members", params, "membres")
         page = resp.json()
         members.extend(
             {"discord_id": m["user"]["id"], "username": m["user"]["username"]}
@@ -163,17 +173,7 @@ async def get_voice_channels() -> list[dict]:
     ):
         return _voice_channels_cache
 
-    try:
-        resp = await _client().get(f"/guilds/{GUILD_ID}/channels")
-    except httpx.HTTPError as e:
-        raise DiscordAPIError(f"Échec de connexion à l'API Discord (salons) : {e}") from e
-
-    if resp.status_code == 429:
-        retry_after = resp.json().get("retry_after", "?")
-        raise DiscordAPIError(f"Rate limit Discord (salons) — retry_after={retry_after}s")
-    if resp.status_code >= 400:
-        raise DiscordAPIError(f"Erreur API Discord (salons) : {resp.status_code} {resp.text}")
-
+    resp = await _get_with_retry(f"/guilds/{GUILD_ID}/channels", None, "salons")
     channels = resp.json()
     voice_channels = [
         {"channel_id": c["id"], "name": c["name"]}
