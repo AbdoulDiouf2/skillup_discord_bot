@@ -5,6 +5,7 @@ from fastapi import FastAPI
 from api import discord_client
 from api.routers import admin as admin_router
 from api.routers import journal as journal_router
+from api.routers import vagues as vagues_router
 from bot.db.database import close_pool, init_db
 
 
@@ -19,6 +20,7 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="SkillUp API", lifespan=lifespan)
 app.include_router(journal_router.router)
+app.include_router(vagues_router.router)
 app.include_router(admin_router.router)
 
 

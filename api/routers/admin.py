@@ -28,7 +28,6 @@ from api.schemas import (
     SessionSupprimerResponse,
     VagueAdminOut,
     VagueCreerRequest,
-    VaguesListResponse,
 )
 from bot.services.admin_service import (
     resolve_binome_definir,
@@ -47,7 +46,6 @@ from bot.services.admin_service import (
     resolve_vague_activer,
     resolve_vague_cloturer,
     resolve_vague_creer,
-    resolve_vagues_lister,
 )
 from bot.services.errors import ResolutionError
 
@@ -76,14 +74,6 @@ async def get_discord_voice_channels():
         raise HTTPException(503, str(e)) from e
 
     return DiscordVoiceChannelsResponse(channels=[DiscordVoiceChannelOut(**c) for c in channels])
-
-
-@router.get("/vagues", response_model=VaguesListResponse)
-async def get_vagues(statut: str | None = None, db=Depends(get_db)):
-    """Liste toutes les vagues (pas seulement la vague active), filtrables par statut.
-    Équivalent API de /vague-lister."""
-    vagues = await resolve_vagues_lister(db, statut)
-    return VaguesListResponse(vagues=[VagueAdminOut(**dict(v)) for v in vagues])
 
 
 @router.post("/vagues", response_model=VagueAdminOut)
