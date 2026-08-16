@@ -204,8 +204,11 @@ async def get_sessions(
     statut: str | None = None,
     db=Depends(get_db),
 ):
+    # /sessions-lister côté Discord garde le défaut 50 (tient dans un message) — l'API web
+    # n'a pas cette contrainte, donc on relève explicitement la limite ici pour ne pas
+    # tronquer silencieusement les listes/agrégats du dashboard CPS Connect.
     try:
-        sessions = await resolve_sessions_lister(db, membre, vague, semaine, statut)
+        sessions = await resolve_sessions_lister(db, membre, vague, semaine, statut, limit=2000)
     except ResolutionError as e:
         raise HTTPException(404, str(e)) from e
 

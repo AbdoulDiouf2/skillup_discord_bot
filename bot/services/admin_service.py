@@ -56,11 +56,16 @@ async def resolve_sessions_lister(
     vague_id: int | None,
     semaine: int | None,
     statut: str | None,
+    limit: int = 50,
 ) -> list:
     """Mêmes règles que /sessions-lister ET que resolve_members_lister : vague donnée
     -> cette vague ; sinon -> vague active (ResolutionError si aucune). Jamais de
     filtrage "toutes vagues" silencieux. Si `membre_discord_id` est fourni, résout
-    aussi son member_id dans cette même vague, erreur s'il n'en est pas membre."""
+    aussi son member_id dans cette même vague, erreur s'il n'en est pas membre.
+
+    `limit` par défaut à 50 pour rester identique au comportement historique de
+    /sessions-lister côté Discord (tient dans un message). L'API web (qui n'a pas cette
+    contrainte d'affichage) passe une valeur plus haute explicitement — cf. api/routers/admin.py."""
     wave = await _resolve_wave(db, vague_id)
 
     member_id = None
@@ -71,7 +76,7 @@ async def resolve_sessions_lister(
         member_id = m["id"]
 
     return await list_filtered(
-        db, wave_id=wave["id"], semaine=semaine, member_id=member_id, statut=statut
+        db, wave_id=wave["id"], semaine=semaine, member_id=member_id, statut=statut, limit=limit
     )
 
 
