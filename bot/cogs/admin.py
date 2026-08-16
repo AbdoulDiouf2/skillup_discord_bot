@@ -55,6 +55,7 @@ class AdminCog(commands.Cog):
         self.bot = bot
 
     @app_commands.command(name="vague-creer", description="[Admin] Crée une nouvelle vague")
+    @app_commands.default_permissions(manage_guild=True)
     @is_admin()
     async def vague_creer(
         self, interaction: discord.Interaction, nom: str, date_debut: str, date_fin: str
@@ -78,6 +79,7 @@ class AdminCog(commands.Cog):
         )
 
     @app_commands.command(name="vague-activer", description="[Admin] Active une vague en brouillon")
+    @app_commands.default_permissions(manage_guild=True)
     @is_admin()
     async def vague_activer(self, interaction: discord.Interaction, vague_id: int):
         async with get_connection() as db:
@@ -108,6 +110,7 @@ class AdminCog(commands.Cog):
     @app_commands.command(
         name="vague-cloturer", description="[Admin] Clôture une vague (par défaut la vague active)"
     )
+    @app_commands.default_permissions(manage_guild=True)
     @is_admin()
     async def vague_cloturer(self, interaction: discord.Interaction, vague_id: int | None = None):
         async with get_connection() as db:
@@ -139,6 +142,7 @@ class AdminCog(commands.Cog):
     @app_commands.choices(
         profil=[app_commands.Choice(name=p, value=p) for p in PROFILS]
     )
+    @app_commands.default_permissions(manage_guild=True)
     @is_admin()
     async def membre_ajouter(
         self,
@@ -192,6 +196,7 @@ class AdminCog(commands.Cog):
             for c in ("nom", "profil", "certif_ou_projet", "objectif_vague")
         ]
     )
+    @app_commands.default_permissions(manage_guild=True)
     @is_admin()
     async def membre_editer(
         self,
@@ -226,6 +231,7 @@ class AdminCog(commands.Cog):
         name="membre-lier-thread",
         description="[Admin] Rattache manuellement le post objectif existant d'un membre",
     )
+    @app_commands.default_permissions(manage_guild=True)
     @is_admin()
     async def membre_lier_thread(
         self,
@@ -260,6 +266,7 @@ class AdminCog(commands.Cog):
         )
 
     @app_commands.command(name="binome-definir", description="[Admin] Définit un binôme pour une semaine")
+    @app_commands.default_permissions(manage_guild=True)
     @is_admin()
     async def binome_definir(
         self,
@@ -314,6 +321,7 @@ class AdminCog(commands.Cog):
     @app_commands.command(
         name="binome-retirer", description="[Admin] Dissout un binôme pour une semaine"
     )
+    @app_commands.default_permissions(manage_guild=True)
     @is_admin()
     async def binome_retirer(
         self,
@@ -382,6 +390,7 @@ class AdminCog(commands.Cog):
         await interaction.followup.send(message, ephemeral=True)
 
     @app_commands.command(name="vague-lister", description="[Admin] Liste toutes les vagues et leur statut")
+    @app_commands.default_permissions(manage_guild=True)
     @is_admin()
     async def vague_lister(self, interaction: discord.Interaction):
         async with get_connection() as db:
@@ -402,6 +411,7 @@ class AdminCog(commands.Cog):
     @app_commands.command(
         name="membres-lister", description="[Admin] Liste les membres d'une vague (défaut : vague active)"
     )
+    @app_commands.default_permissions(manage_guild=True)
     @is_admin()
     async def membres_lister(self, interaction: discord.Interaction, vague: int | None = None):
         async with get_connection() as db:
@@ -442,6 +452,7 @@ class AdminCog(commands.Cog):
     @app_commands.command(
         name="binomes-semaine", description="[Admin] Liste les binômes constitués pour une semaine"
     )
+    @app_commands.default_permissions(manage_guild=True)
     @is_admin()
     async def binomes_semaine(
         self,
@@ -489,6 +500,7 @@ class AdminCog(commands.Cog):
             app_commands.Choice(name=s, value=s) for s in ("ouverte", "complète", "incomplète")
         ]
     )
+    @app_commands.default_permissions(manage_guild=True)
     @is_admin()
     async def sessions_lister(
         self,

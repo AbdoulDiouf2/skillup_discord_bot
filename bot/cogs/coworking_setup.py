@@ -76,6 +76,7 @@ class CoworkingSetupCog(commands.Cog):
         name="salon-coworking-ajouter",
         description="[Admin] Déclare un ou plusieurs salons vocaux comme salons de coworking",
     )
+    @app_commands.default_permissions(manage_guild=True)
     @is_admin()
     async def salon_coworking_ajouter(self, interaction: discord.Interaction):
         async with get_connection() as db:
@@ -104,6 +105,7 @@ class CoworkingSetupCog(commands.Cog):
         name="salon-coworking-retirer",
         description="[Admin] Retire un ou plusieurs salons vocaux de la liste coworking",
     )
+    @app_commands.default_permissions(manage_guild=True)
     @is_admin()
     async def salon_coworking_retirer(self, interaction: discord.Interaction):
         async with get_connection() as db:
@@ -130,6 +132,7 @@ class CoworkingSetupCog(commands.Cog):
         name="salons-coworking-lister",
         description="[Admin] Liste les salons de coworking, par vague",
     )
+    @app_commands.default_permissions(manage_guild=True)
     @is_admin()
     async def salons_coworking_lister(self, interaction: discord.Interaction, vague: int | None = None):
         async with get_connection() as db:
