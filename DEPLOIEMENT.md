@@ -1,160 +1,171 @@
-# Procédure de déploiement — Bot SkillUp
+# Procédure de déploiement — Bot & API SkillUp
 
-Cible : VPS Linux (Ubuntu 22.04/24.04), ~4-6€/mois (OVH, Hetzner, Contabo...).
-Pourquoi un VPS : disponibilité 24/7 garantie (contrairement aux offres PaaS gratuites qui se mettent en veille — point d'attention identifié au §11 du CDC), et une base SQLite se sauvegarde en copiant un simple fichier.
+Cible : VPS mutualisé `maadec-infra-01` (Hetzner, Docker + Caddy), accès admin
+réservé au réseau Tailscale. Base de données : **Neon Postgres** (cloud, aucune
+base hébergée sur le VPS).
 
-## 1. Provisionner le VPS
+Deux services déployés :
+- **`skillup-bot`** — worker (bot Discord), aucune entrée HTTP.
+- **`skillup-api`** — API FastAPI lecture/écriture, utilisée par CPS Connect,
+  exposée en HTTPS via Caddy sur `https://skillup-api.maadec.com`.
 
-1. Créer une instance Ubuntu 22.04 ou 24.04 LTS chez le fournisseur choisi (le moins cher suffit : 1 vCPU / 1 Go RAM).
-2. Se connecter en SSH :
-   ```bash
-   ssh root@<ip_du_serveur>
-   ```
-3. Créer un utilisateur dédié (éviter de tourner en root) :
-   ```bash
-   adduser skillup
-   usermod -aG sudo skillup
-   su - skillup
-   ```
+## 1. Provisionner (déjà fait)
 
-## 2. Installer les dépendances système
+Le VPS `maadec-infra-01` est partagé entre plusieurs projets. Voir
+`VPS_ENVIRONMENT_maadec-infra-01.md` pour les détails complets (réseaux Docker,
+Caddy, règles à ne jamais violer). Accès SSH uniquement via Tailscale.
+
+## 2. Premier déploiement manuel
 
 ```bash
-sudo apt update && sudo apt upgrade -y
-sudo apt install -y python3.11 python3.11-venv git
-```
-
-## 3. Récupérer le code
-
-```bash
-cd ~
+ssh maadec@<ip-tailscale-du-vps>
+mkdir -p ~/infra/prod
+cd ~/infra/prod
 git clone https://github.com/AbdoulDiouf2/skillup_discord_bot.git
 cd skillup_discord_bot
-python3.11 -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
 ```
 
-## 4. Configurer le `.env`
-
-Le `.env` n'est **jamais** dans le dépôt git (voir `.gitignore`) — il se crée manuellement sur le serveur, une seule fois.
+### `.env` (jamais commité)
 
 ```bash
-cp .env.example .env
 nano .env
 ```
 
-Renseigner :
 ```
-DISCORD_TOKEN=<token du bot, depuis le Developer Portal Discord>
-GUILD_ID=<id du serveur Alumni CPS>
-DB_PATH=data/skillup.db
-```
-
-Le token est un secret : ne jamais le committer, ne jamais le partager en clair (leçon apprise pendant le dev — voir historique de session, le token affiché en console locale devait rester local).
-
-## 5. Tourner en continu avec systemd
-
-Créer le service :
-```bash
-sudo nano /etc/systemd/system/skillup-bot.service
+DISCORD_TOKEN=<token bot PROD, Developer Portal>
+GUILD_ID=<ID serveur Alumni CPS prod>
+DATABASE_URL=postgresql://user:password@host/dbname?sslmode=require   # Neon, même base pour bot ET api
+API_KEY=<clé partagée avec CPS Connect, header X-API-Key>
 ```
 
-Contenu :
-```ini
-[Unit]
-Description=Bot Discord SkillUp
-After=network.target
+`DATABASE_URL` et `API_KEY` **doivent être identiques** entre le bot et l'API
+(même `.env`, chargé par les deux services) — sinon incohérence de données ou
+401 côté CPS Connect.
 
-[Service]
-Type=simple
-User=skillup
-WorkingDirectory=/home/skillup/skillup_discord_bot
-Environment=PYTHONPATH=/home/skillup/skillup_discord_bot
-ExecStart=/home/skillup/skillup_discord_bot/.venv/bin/python -m bot.main
-Restart=on-failure
-RestartSec=5
-
-[Install]
-WantedBy=multi-user.target
-```
-
-Activer et démarrer :
-```bash
-sudo systemctl daemon-reload
-sudo systemctl enable skillup-bot
-sudo systemctl start skillup-bot
-```
-
-Vérifier :
-```bash
-sudo systemctl status skillup-bot
-journalctl -u skillup-bot -f      # logs en direct
-```
-
-`Restart=on-failure` : le bot redémarre seul en cas de crash. `enable` : redémarre aussi après un reboot du serveur.
-
-## 6. Sauvegarde de la base SQLite
-
-La base (`data/skillup.db`) est un fichier unique — sauvegarde simple par copie, mais **jamais à chaud sans précaution** (SQLite peut être en écriture). Utiliser la commande `.backup` intégrée à SQLite, qui gère la cohérence même bot actif.
-
-Script de sauvegarde `~/skillup_discord_bot/backup.sh` :
-```bash
-#!/bin/bash
-set -e
-DATE=$(date +%Y-%m-%d_%H%M)
-BACKUP_DIR=/home/skillup/backups
-mkdir -p "$BACKUP_DIR"
-sqlite3 /home/skillup/skillup_discord_bot/data/skillup.db ".backup '$BACKUP_DIR/skillup_$DATE.db'"
-find "$BACKUP_DIR" -name "skillup_*.db" -mtime +30 -delete
-```
+### Build & run
 
 ```bash
-chmod +x ~/skillup_discord_bot/backup.sh
+docker compose up -d --build
+docker compose logs -f
 ```
 
-Cron quotidien (3h du matin) :
-```bash
-crontab -e
-```
-Ajouter :
-```
-0 3 * * * /home/skillup/skillup_discord_bot/backup.sh
-```
+## 3. Exposition HTTP de l'API (Caddy)
 
-Recommandé en plus : rapatrier périodiquement les sauvegardes hors du VPS (ex. `rsync` vers une machine perso, ou upload vers un stockage cloud) — une sauvegarde qui reste sur la même machine que la base ne protège pas contre une panne du serveur.
-
-## 7. Mettre à jour le bot (nouvelle version du code)
+DNS chez Hostinger (hPanel) : enregistrement **A** `skillup-api` → IP publique
+du VPS, sans proxy.
 
 ```bash
-cd ~/skillup_discord_bot
-sudo systemctl stop skillup-bot
+nano ~/infra/caddy/Caddyfile
+```
+```
+skillup-api.maadec.com {
+    reverse_proxy skillup-api:8000
+}
+```
+```bash
+cd ~/infra/caddy && docker compose exec caddy caddy reload --config /etc/caddy/Caddyfile
+```
+
+Vérifier : `curl https://skillup-api.maadec.com/health` → `{"status":"ok"}`.
+
+## 4. Invitation du bot sur le serveur Discord prod
+
+Lien OAuth2 (scope `bot` + `applications.commands`, permissions : Send
+Messages, Read Message History, Manage Threads, Embed Links, View Channels,
+Use Slash Commands) :
+```
+https://discord.com/oauth2/authorize?client_id=<CLIENT_ID_PROD>&permissions=19327437824&scope=bot%20applications.commands
+```
+
+Un bot invité sans le scope `bot` n'est jamais réellement membre du serveur —
+`bot.tree.sync(guild=...)` échoue alors en `403 Forbidden`. S'il n'est pas
+invité du tout, l'API échoue en `404 Unknown Guild` sur les appels
+`/guilds/{GUILD_ID}/...`.
+
+Checklist Developer Portal / serveur :
+- [ ] Scope `bot` + `applications.commands`
+- [ ] Intent **Server Members** activé (nécessaire RG-11/RG-12, détection vocale)
+- [ ] Rôle Discord `Admin SkillUp` créé
+- [ ] Permission **`Manage Server`** cochée sur le rôle `Admin SkillUp` — permet
+      aux commandes admin (`default_permissions(manage_guild=True)` côté code)
+      de s'afficher par défaut, sans toggle manuel par commande dans
+      Paramètres serveur → Intégrations
+
+## 5. Firebase (CPS Connect) — secrets Cloud Functions
+
+`functions/index.js` (repo CPS Connect) relaie les appels vers l'API SkillUp
+via `skillupProxy` — le frontend n'appelle jamais l'API directement.
+
+```bash
+firebase functions:secrets:set SKILLUP_API_URL       # https://skillup-api.maadec.com
+firebase functions:secrets:set SKILLUP_API_KEY        # = API_KEY du .env VPS
+firebase functions:secrets:set DISCORD_CLIENT_ID      # app OAuth prod, Developer Portal
+firebase functions:secrets:set DISCORD_CLIENT_SECRET
+firebase functions:secrets:set DISCORD_REDIRECT_URI   # doit matcher OAuth2 → Redirects sur l'app
+```
+Chaque `secrets:set` propose un redeploy automatique des fonctions concernées.
+
+`DISCORD_REDIRECT_URI` doit être enregistrée à l'identique (casse, trailing
+slash) dans Developer Portal → OAuth2 → Redirects de l'app prod, sinon
+`invalid_redirect_uri`.
+
+Dev/test séparé de prod : la Cloud Function déployée reste toujours branchée
+sur prod. Pour tester en local sans y toucher, utiliser l'émulateur Firebase
+avec `functions/.secret.local` (gitignored) pointant vers l'API dev (Vercel).
+
+## 6. CI/CD — déploiement automatique
+
+Workflow `.github/workflows/deploy.yml` : chaque push sur `main` rejoint le
+tailnet (clé Tailscale éphémère) puis SSH sur le VPS pour `git pull` +
+`docker compose up -d --build`.
+
+Secrets GitHub requis (repo → Settings → Secrets and variables → Actions) :
+
+| Secret | Contenu |
+|---|---|
+| `TS_AUTHKEY` | clé Tailscale (admin console → Settings → Keys → Generate auth key, reusable + ephemeral) |
+| `DEPLOY_SSH_KEY` | clé privée SSH dédiée, dont la publique est dans `~/.ssh/authorized_keys` sur le VPS |
+| `VPS_HOST` | IP Tailscale du VPS (`tailscale ip -4` sur le VPS) |
+
+Déploiement manuel toujours possible en cas de besoin (section 2, `docker
+compose up -d --build`).
+
+## 7. Mettre à jour manuellement (hors CI/CD)
+
+```bash
+cd ~/infra/prod/skillup_discord_bot
 git pull origin main
-source .venv/bin/activate
-pip install -r requirements.txt
-sudo systemctl start skillup-bot
+docker compose up -d --build
 ```
 
-## 8. Purge des données d'un membre (RGPD léger, §13 du CDC)
+## 8. Sauvegarde de la base
 
-Sur demande d'un membre, supprimer ses données :
-```bash
-sqlite3 ~/skillup_discord_bot/data/skillup.db
+Neon gère ses propres snapshots/point-in-time recovery côté cloud — pas de
+script de backup local nécessaire (contrairement à l'ancienne cible SQLite).
+Vérifier la politique de rétention dans la console Neon si besoin de la
+renforcer.
+
+## 9. Purge des données d'un membre (RGPD léger, §13 du CDC)
+
+Sur demande d'un membre, se connecter à la base Neon (`psql "$DATABASE_URL"`
+ou console Neon) :
+```sql
+SELECT * FROM members WHERE discord_id = '<discord_id>';   -- récupérer l'id d'abord
 DELETE FROM sessions WHERE member_id = <id>;
 DELETE FROM members WHERE id = <id>;
 ```
-(Vérifier d'abord l'id via `SELECT * FROM members WHERE discord_id = '<discord_id>';`)
 
 ## Checklist de mise en prod
 
-- [ ] VPS provisionné, accès SSH fonctionnel
-- [ ] `.env` renseigné avec le vrai token de prod (différent du bot de dev)
-- [ ] Bot invité sur le serveur Alumni CPS avec le scope `bot` + `applications.commands` (voir leçon apprise en dev : un bot invité sans scope `bot` n'est jamais réellement membre du serveur)
-- [ ] Intents `Server Members` activé sur le Developer Portal (nécessaire pour la détection vocale RG-11/RG-12)
-- [ ] Rôle Discord `Admin SkillUp` créé et attribué à l'équipe qui pilote l'initiative
+- [x] VPS provisionné, Docker + Caddy en place (`maadec-infra-01`)
+- [x] `.env` renseigné avec le vrai token de prod (différent du bot de dev)
+- [x] Bot invité sur le serveur Alumni CPS avec le scope `bot` + `applications.commands`
+- [x] Intent `Server Members` activé
+- [x] Rôle Discord `Admin SkillUp` créé, permission `Manage Server` cochée
 - [ ] Salons de coworking déclarés via `/salon-coworking-ajouter`
-- [ ] Vague créée via `/vague-creer` (brouillon), **activée via `/vague-activer`**, membres ajoutés via `/membre-ajouter`
-- [ ] Service systemd actif, `enable` pour survivre à un reboot
-- [ ] `/guide` posté et épinglé dans un salon de référence (ou renvoyer les membres vers `/aide` pour un résumé rapide)
-- [ ] Commandes admin masquées aux non-admins : Paramètres serveur → Intégrations → SkillUp Bot → Commandes, restreindre au rôle `Admin SkillUp` (raffinement d'affichage — la sécurité réelle est déjà assurée par `is_admin()` dans le code, cette étape évite juste que les commandes admin apparaissent dans l'autocomplétion des membres)
-- [ ] Cron de sauvegarde en place et testé une fois manuellement
+- [ ] Vague créée via `/vague-creer` (brouillon), activée via `/vague-activer`, membres ajoutés via `/membre-ajouter`
+- [x] `skillup-api` exposée en HTTPS (`skillup-api.maadec.com`), `/health` OK
+- [x] Secrets Firebase (`SKILLUP_API_URL`, `SKILLUP_API_KEY`, `DISCORD_CLIENT_*`) à jour côté CPS Connect
+- [x] CI/CD GitHub Actions en place (déploiement auto sur push `main`)
+- [ ] `/guide` posté et épinglé dans un salon de référence
+- [ ] Commandes admin masquées aux non-admins via toggle Discord (optionnel — `default_permissions` gère déjà le cas par défaut)
