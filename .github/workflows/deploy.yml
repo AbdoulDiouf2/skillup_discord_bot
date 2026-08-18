@@ -15,12 +15,21 @@ jobs:
           oauth-secret: ${{ secrets.TS_OAUTH_CLIENT_SECRET }}
           tags: tag:ci
 
+      - name: Wait for Tailscale path to VPS
+        run: |
+          for i in $(seq 1 10); do
+            tailscale ping -c 1 --timeout 3s "${{ secrets.VPS_HOST }}" && break
+            echo "Ping $i failed, retrying..."
+            sleep 2
+          done
+
       - name: Deploy via SSH
         uses: appleboy/ssh-action@v1.2.0
         with:
           host: ${{ secrets.VPS_HOST }}
           username: maadec
           key: ${{ secrets.DEPLOY_SSH_KEY }}
+          timeout: 60s
           script: |
             cd ~/infra/prod/skillup_discord_bot
             git pull origin main
