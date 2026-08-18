@@ -8,6 +8,36 @@ jobs:
   deploy:
     runs-on: ubuntu-latest
     steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Determine which services changed
+        id: changes
+        run: |
+          BEFORE="${{ github.event.before }}"
+          AFTER="${{ github.sha }}"
+
+          if [ -z "$BEFORE" ] || [ "$BEFORE" = "0000000000000000000000000000000000000000" ]; then
+            CHANGED=""
+            RESTART_BOT=true
+            RESTART_API=true
+          else
+            CHANGED=$(git diff --name-only "$BEFORE" "$AFTER")
+            RESTART_BOT=false
+            RESTART_API=false
+            echo "$CHANGED" | grep -qE '^bot/(cogs|tasks)/|^bot/main\.py$' && RESTART_BOT=true
+            echo "$CHANGED" | grep -qE '^api/' && RESTART_API=true
+            echo "$CHANGED" | grep -qE '^bot/(db|services)/|^bot/config\.py$|^requirements\.txt$|^Dockerfile$|^docker-compose\.yml$|^\.dockerignore$' \
+              && { RESTART_BOT=true; RESTART_API=true; }
+          fi
+
+          echo "Fichiers modifiés :"
+          echo "$CHANGED"
+          echo "restart_bot=$RESTART_BOT" >> "$GITHUB_OUTPUT"
+          echo "restart_api=$RESTART_API" >> "$GITHUB_OUTPUT"
+
       - name: Connect to Tailscale
         uses: tailscale/github-action@v3
         with:
@@ -31,17 +61,42 @@ jobs:
           username: maadec
           key: ${{ secrets.DEPLOY_SSH_KEY }}
           timeout: 60s
+          envs: RESTART_BOT,RESTART_API
           script: |
             cd ~/infra/prod/skillup_discord_bot
             git pull origin main
-            docker compose up -d --build
+
+            if [ "$RESTART_BOT" = true ] && [ "$RESTART_API" = true ]; then
+              docker compose up -d --build
+            elif [ "$RESTART_BOT" = true ]; then
+              docker compose up -d --build skillup-bot
+            elif [ "$RESTART_API" = true ]; then
+              docker compose up -d --build skillup-api
+            else
+              echo "Aucun changement pertinent au runtime — rien à redémarrer."
+            fi
+        env:
+          RESTART_BOT: ${{ steps.changes.outputs.restart_bot }}
+          RESTART_API: ${{ steps.changes.outputs.restart_api }}
 
       - name: Notify Telegram (succès)
         if: success()
+        env:
+          RESTART_BOT: ${{ steps.changes.outputs.restart_bot }}
+          RESTART_API: ${{ steps.changes.outputs.restart_api }}
         run: |
+          if [ "$RESTART_BOT" = true ] && [ "$RESTART_API" = true ]; then
+            SUMMARY="🤖 bot + 🌐 api redémarrés"
+          elif [ "$RESTART_BOT" = true ]; then
+            SUMMARY="🤖 bot redémarré, 🌐 api inchangée"
+          elif [ "$RESTART_API" = true ]; then
+            SUMMARY="🌐 api redémarrée, 🤖 bot inchangé"
+          else
+            SUMMARY="aucun conteneur redémarré (changement non applicable au runtime)"
+          fi
           curl -s -X POST "https://api.telegram.org/bot${{ secrets.TELEGRAM_BOT_TOKEN }}/sendMessage" \
             -d chat_id="${{ secrets.TELEGRAM_CHAT_ID }}" \
-            -d text="✅ SkillUp déployé avec succès sur le VPS (commit ${{ github.sha }})."
+            -d text="✅ SkillUp déployé avec succès (commit ${{ github.sha }}). $SUMMARY."
 
       - name: Notify Telegram (échec)
         if: failure()
