@@ -146,7 +146,13 @@ async def get_guild_members() -> list[dict]:
         resp = await _get_with_retry(f"/guilds/{GUILD_ID}/members", params, "membres")
         page = resp.json()
         members.extend(
-            {"discord_id": m["user"]["id"], "username": m["user"]["username"]}
+            {
+                "discord_id": m["user"]["id"],
+                # Priorité au surnom serveur, puis au nom affiché Discord, puis au
+                # pseudo (@handle) en dernier recours — c'est ce que les membres
+                # voient réellement à l'écran, contrairement au pseudo technique.
+                "username": m.get("nick") or m["user"].get("global_name") or m["user"]["username"],
+            }
             for m in page
             if not m["user"].get("bot", False)
         )
