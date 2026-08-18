@@ -24,6 +24,7 @@ jobs:
           done
 
       - name: Deploy via SSH
+        id: deploy
         uses: appleboy/ssh-action@v1.2.0
         with:
           host: ${{ secrets.VPS_HOST }}
@@ -34,3 +35,17 @@ jobs:
             cd ~/infra/prod/skillup_discord_bot
             git pull origin main
             docker compose up -d --build
+
+      - name: Notify Telegram (succès)
+        if: success()
+        run: |
+          curl -s -X POST "https://api.telegram.org/bot${{ secrets.TELEGRAM_BOT_TOKEN }}/sendMessage" \
+            -d chat_id="${{ secrets.TELEGRAM_CHAT_ID }}" \
+            -d text="✅ SkillUp déployé avec succès sur le VPS (commit ${{ github.sha }})."
+
+      - name: Notify Telegram (échec)
+        if: failure()
+        run: |
+          curl -s -X POST "https://api.telegram.org/bot${{ secrets.TELEGRAM_BOT_TOKEN }}/sendMessage" \
+            -d chat_id="${{ secrets.TELEGRAM_CHAT_ID }}" \
+            -d text="❌ Échec du déploiement SkillUp (commit ${{ github.sha }}). Voir : ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
