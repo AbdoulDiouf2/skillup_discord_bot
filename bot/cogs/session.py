@@ -33,6 +33,36 @@ def _sort_creneaux(creneaux: set[str]) -> list[str]:
     return sorted(creneaux, key=sort_key)
 
 
+async def _require_coworking_channel(
+    interaction: discord.Interaction, db, wave_id: int, verbe: str
+) -> discord.abc.GuildChannel | None:
+    """Vérifie que le membre est dans un salon vocal de coworking reconnu et que la
+    commande a été lancée dans le fil de discussion de ce même salon (RG-12)."""
+    voice_state = interaction.user.voice
+    if voice_state is None or voice_state.channel is None:
+        await interaction.response.send_message(
+            f"Rejoins un salon de coworking avant de {verbe} ta session.", ephemeral=True
+        )
+        return None
+
+    channel = voice_state.channel
+    if not await is_coworking_channel(db, str(channel.id), wave_id):
+        await interaction.response.send_message(
+            f"Rejoins un salon de coworking avant de {verbe} ta session.", ephemeral=True
+        )
+        return None
+
+    if interaction.channel_id != channel.id:
+        await interaction.response.send_message(
+            f"Lance la commande dans le fil de discussion du salon **{channel.name}** "
+            f"(celui où tu es connecté).",
+            ephemeral=True,
+        )
+        return None
+
+    return channel
+
+
 class SessionStartModal(discord.ui.Modal, title="Démarrer une session"):
     objectif = discord.ui.TextInput(
         label="Objectif de la session",
@@ -75,18 +105,8 @@ class SessionStartModal(discord.ui.Modal, title="Démarrer une session"):
                 )
                 return
 
-            voice_state = interaction.user.voice
-            if voice_state is None or voice_state.channel is None:
-                await interaction.response.send_message(
-                    "Rejoins un salon de coworking avant de démarrer ta session.", ephemeral=True
-                )
-                return
-
-            channel = voice_state.channel
-            if not await is_coworking_channel(db, str(channel.id), wave["id"]):
-                await interaction.response.send_message(
-                    "Rejoins un salon de coworking avant de démarrer ta session.", ephemeral=True
-                )
+            channel = await _require_coworking_channel(interaction, db, wave["id"], "démarrer")
+            if channel is None:
                 return
 
             now = datetime.now(TZ)
@@ -145,6 +165,10 @@ class SessionEndModal(discord.ui.Modal, title="Clôturer ta session"):
                 await interaction.response.send_message(
                     "Tu n'as pas de session ouverte.", ephemeral=True
                 )
+                return
+
+            channel = await _require_coworking_channel(interaction, db, wave["id"], "clôturer")
+            if channel is None:
                 return
 
             now = datetime.now(TZ)
