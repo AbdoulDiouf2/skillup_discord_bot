@@ -1,3 +1,4 @@
+import re
 from datetime import datetime
 
 import discord
@@ -13,12 +14,23 @@ from bot.db.sessions import (
     end_session,
     get_by_id,
     get_open_session,
+    list_distinct_creneaux,
     list_recent_by_member,
     start_session,
     update_field,
 )
 from bot.db.waves import get_active_wave
 from bot.services.weeks import week_number_for_date
+
+CRENEAU_FORMAT = re.compile(r"\d{1,2}h-\d{1,2}h")
+
+
+def _sort_creneaux(creneaux: set[str]) -> list[str]:
+    def sort_key(c: str) -> int:
+        m = re.match(r"\d{1,2}", c)
+        return int(m.group()) if m else 0
+
+    return sorted(creneaux, key=sort_key)
 
 
 class SessionStartModal(discord.ui.Modal, title="Démarrer une session"):
@@ -34,6 +46,12 @@ class SessionStartModal(discord.ui.Modal, title="Démarrer une session"):
         self.creneau = creneau
 
     async def on_submit(self, interaction: discord.Interaction):
+        if not CRENEAU_FORMAT.fullmatch(self.creneau):
+            await interaction.response.send_message(
+                "Créneau invalide — format attendu `HHh-HHh` (ex. 19h-21h).", ephemeral=True
+            )
+            return
+
         async with get_connection() as db:
             wave = await get_active_wave(db)
             if wave is None:
@@ -180,13 +198,21 @@ class SessionCog(commands.Cog):
         self.bot = bot
 
     @app_commands.command(name="session-start", description="Démarre une session de coworking")
-    @app_commands.choices(
-        creneau=[app_commands.Choice(name=c, value=c) for c in CRENEAUX]
-    )
-    async def session_start(
-        self, interaction: discord.Interaction, creneau: app_commands.Choice[str]
-    ):
-        await interaction.response.send_modal(SessionStartModal(creneau.value))
+    async def session_start(self, interaction: discord.Interaction, creneau: str):
+        await interaction.response.send_modal(SessionStartModal(creneau))
+
+    @session_start.autocomplete("creneau")
+    async def session_start_creneau_autocomplete(
+        self, interaction: discord.Interaction, current: str
+    ) -> list[app_commands.Choice[str]]:
+        # Suggestions seulement — le champ reste libre (pas app_commands.choices), donc
+        # taper un créneau hors liste (ex. "17h-19h") reste possible.
+        async with get_connection() as db:
+            db_creneaux = await list_distinct_creneaux(db)
+        options = _sort_creneaux(set(CRENEAUX) | set(db_creneaux))
+        if current:
+            options = [c for c in options if current.lower() in c.lower()]
+        return [app_commands.Choice(name=c, value=c) for c in options[:25]]
 
     @app_commands.command(name="session-end", description="Clôture ta session en cours")
     async def session_end(self, interaction: discord.Interaction):

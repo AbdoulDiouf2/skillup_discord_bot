@@ -5,7 +5,7 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 
-from bot.config import ADMIN_ROLE_NAME
+from bot.config import ADMIN_ROLE_NAME, CRENEAUX
 from bot.db.database import get_connection
 from bot.db.binomes import BinomeError, define_binome, get_partner_id, remove_binome
 from bot.db.members import add_member, get_member, get_member_by_id, set_thread_objectif_id
@@ -13,6 +13,7 @@ from bot.db.waves import WaveError, activate_wave, close_wave, create_wave, get_
 from bot.services.admin_service import (
     resolve_binomes_semaine,
     resolve_members_lister,
+    resolve_session_creer,
     resolve_sessions_lister,
 )
 from bot.services.errors import ResolutionError
@@ -406,6 +407,57 @@ class AdminCog(commands.Cog):
         ]
         await interaction.response.send_message(
             "**Vagues**\n\n" + "\n".join(lignes), ephemeral=True
+        )
+
+    @app_commands.command(
+        name="session-creer",
+        description="[Admin] Crée une session complète pour un membre (rattrapage)",
+    )
+    @app_commands.choices(
+        creneau=[app_commands.Choice(name=c, value=c) for c in CRENEAUX]
+    )
+    @app_commands.default_permissions(manage_guild=True)
+    @is_admin()
+    async def session_creer(
+        self,
+        interaction: discord.Interaction,
+        utilisateur: discord.Member,
+        date_session: str,
+        creneau: app_commands.Choice[str],
+        heure_debut: str,
+        heure_fin: str,
+        objectif: str,
+        bilan: str,
+        canal: discord.VoiceChannel | None = None,
+        blocages: str | None = None,
+    ):
+        """Rattrapage admin : crée une session déjà clôturée, pour couvrir une
+        séance tenue avant que le bot ne soit membre du serveur (ou toute session
+        qu'un membre n'a pas pu saisir lui-même via `/session-start` + `/session-end`)."""
+        async with get_connection() as db:
+            try:
+                session = await resolve_session_creer(
+                    db,
+                    None,
+                    str(utilisateur.id),
+                    date_session,
+                    creneau.value,
+                    heure_debut,
+                    heure_fin,
+                    objectif,
+                    bilan,
+                    str(canal.id) if canal else None,
+                    canal.name if canal else None,
+                    blocages,
+                )
+            except ResolutionError as e:
+                await interaction.response.send_message(str(e), ephemeral=True)
+                return
+
+        await interaction.response.send_message(
+            f"Session #{session['id']} créée pour {utilisateur.mention} — "
+            f"{date_session} {creneau.value} ({heure_debut}-{heure_fin}).",
+            ephemeral=True,
         )
 
     @app_commands.command(

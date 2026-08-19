@@ -3,6 +3,17 @@ from datetime import date, datetime
 import aiosqlite
 
 
+async def list_distinct_creneaux(db: aiosqlite.Connection) -> list[str]:
+    """Créneaux déjà utilisés dans l'historique — sert de suggestions autocomplete pour
+    /session-start et /session-creer, en plus des créneaux standards (CRENEAUX)."""
+    db.row_factory = aiosqlite.Row
+    async with db.execute(
+        "SELECT DISTINCT creneau FROM sessions WHERE creneau IS NOT NULL"
+    ) as cur:
+        rows = await cur.fetchall()
+    return [r["creneau"] for r in rows]
+
+
 async def get_open_session(db: aiosqlite.Connection, member_id: int) -> aiosqlite.Row | None:
     db.row_factory = aiosqlite.Row
     async with db.execute(
@@ -37,6 +48,49 @@ async def start_session(
             canal_nom,
             debut.isoformat(),
             objectif,
+        ),
+    )
+    await db.commit()
+    return cur.lastrowid
+
+
+async def create_completed_session(
+    db: aiosqlite.Connection,
+    member_id: int,
+    wave_id: int,
+    semaine: int,
+    session_date: date,
+    creneau: str,
+    canal_id: str | None,
+    canal_nom: str | None,
+    debut: datetime,
+    fin: datetime,
+    objectif: str,
+    bilan: str,
+    blocages: str | None,
+) -> int:
+    """Crée directement une session complète (debut + fin + bilan) — pour un
+    rattrapage admin (ex. session tenue avant que le bot ne soit sur le serveur),
+    contrairement à `start_session` qui laisse la session ouverte pour clôture
+    ultérieure par le membre lui-même."""
+    cur = await db.execute(
+        """INSERT INTO sessions
+           (member_id, wave_id, semaine, date, creneau, canal_id, canal_nom,
+            debut, fin, objectif, bilan, blocages, statut)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'complète')""",
+        (
+            member_id,
+            wave_id,
+            semaine,
+            session_date.isoformat(),
+            creneau,
+            canal_id,
+            canal_nom,
+            debut.isoformat(),
+            fin.isoformat(),
+            objectif,
+            bilan,
+            blocages,
         ),
     )
     await db.commit()

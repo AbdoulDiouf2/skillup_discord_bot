@@ -23,6 +23,7 @@ from api.schemas import (
     SalonOut,
     SalonsListResponse,
     SessionCorrigerRequest,
+    SessionCreerRequest,
     SessionOut,
     SessionsListResponse,
     SessionSupprimerResponse,
@@ -41,6 +42,7 @@ from bot.services.admin_service import (
     resolve_salon_retirer,
     resolve_salons_lister,
     resolve_session_corriger,
+    resolve_session_creer,
     resolve_session_supprimer,
     resolve_sessions_lister,
     resolve_vague_activer,
@@ -299,6 +301,31 @@ async def delete_binome(
 
     message = f"Binôme de {membre['nom']} dissous pour la semaine {semaine}."
     return BinomeActionResponse(message=message, dm_echecs=dm_echecs)
+
+
+@router.post("/sessions", response_model=SessionOut)
+async def post_session(body: SessionCreerRequest, db=Depends(get_db)):
+    """Crée une session déjà clôturée pour un membre (rattrapage admin). Équivalent
+    API de `/session-creer`."""
+    try:
+        session = await resolve_session_creer(
+            db,
+            body.vague,
+            body.discord_id,
+            body.date_session,
+            body.creneau,
+            body.heure_debut,
+            body.heure_fin,
+            body.objectif,
+            body.bilan,
+            body.canal_id,
+            body.canal_nom,
+            body.blocages,
+        )
+    except ResolutionError as e:
+        raise HTTPException(404, str(e)) from e
+
+    return SessionOut(**dict(session))
 
 
 @router.patch("/sessions/{session_id}", response_model=SessionOut)

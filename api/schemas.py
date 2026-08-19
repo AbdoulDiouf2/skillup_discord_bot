@@ -194,3 +194,17 @@ class ObjectifVagueRequest(BaseModel):
 class MembreLierThreadRequest(BaseModel):
     lien_ou_id: str
     vague: int | None = None
+
+
+class SessionCreerRequest(BaseModel):
+    discord_id: str
+    date_session: str  # AAAA-MM-JJ
+    creneau: str
+    heure_debut: str  # HH:MM
+    heure_fin: str  # HH:MM
+    objectif: str
+    bilan: str
+    canal_id: str | None = None
+    canal_nom: str | None = None
+    blocages: str | None = None
+    vague: int | None = None

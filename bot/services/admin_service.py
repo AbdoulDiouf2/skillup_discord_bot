@@ -6,7 +6,7 @@ from bot.db.binomes import BinomeError, define_binome, get_partner_id, list_bino
 from bot.db.coworking_channels import add_channel, list_channels, remove_channel
 from bot.db.members import add_member, get_member, get_member_by_id, list_by_wave, set_thread_objectif_id
 from bot.db.members import update_field as update_member_field
-from bot.db.sessions import delete_session, get_by_id, list_filtered, update_field
+from bot.db.sessions import create_completed_session, delete_session, get_by_id, list_filtered, update_field
 from bot.db.waves import (
     WaveError,
     activate_wave,
@@ -106,6 +106,72 @@ async def resolve_session_corriger(db, session_id: int, champ: str, valeur: str)
         raise ResolutionError(f"Session `{session_id}` introuvable.")
 
     await update_field(db, session_id, champ, valeur)
+    return await get_by_id(db, session_id)
+
+
+async def resolve_session_creer(
+    db,
+    vague_id: int | None,
+    discord_id: str,
+    date_session: str,
+    creneau: str,
+    heure_debut: str,
+    heure_fin: str,
+    objectif: str,
+    bilan: str,
+    canal_id: str | None,
+    canal_nom: str | None,
+    blocages: str | None,
+):
+    """Crée une session déjà clôturée pour un membre — rattrapage admin (ex. séance
+    tenue avant que le bot ne soit sur le serveur). Mêmes règles que la commande
+    Discord `/session-creer`. Retourne la session créée."""
+    # Format libre (pas restreint à CRENEAUX) : le rattrapage doit pouvoir couvrir des
+    # créneaux hors de la liste standard (ex. "17h-19h", déjà présents dans l'historique
+    # importé). On valide juste la forme "HHh-HHh" pour éviter une saisie incohérente.
+    if not re.fullmatch(r"\d{1,2}h-\d{1,2}h", creneau):
+        raise ResolutionError(f"Créneau invalide : `{creneau}`. Format attendu : `HHh-HHh` (ex. 19h-21h).")
+
+    try:
+        y, m, d = map(int, date_session.split("-"))
+        session_date = date(y, m, d)
+    except ValueError as e:
+        raise ResolutionError("Date invalide — format attendu AAAA-MM-JJ.") from e
+
+    try:
+        hh, mm = map(int, heure_debut.split(":"))
+        debut = datetime(y, m, d, hh, mm, tzinfo=TZ)
+        fh, fm = map(int, heure_fin.split(":"))
+        fin = datetime(y, m, d, fh, fm, tzinfo=TZ)
+    except ValueError as e:
+        raise ResolutionError("Heure invalide — format attendu HH:MM.") from e
+
+    if fin <= debut:
+        raise ResolutionError("L'heure de fin doit être après l'heure de début.")
+
+    wave = await _resolve_wave(db, vague_id)
+
+    member = await get_member(db, discord_id, wave["id"])
+    if member is None:
+        raise ResolutionError(f"Ce membre n'est pas dans la vague **{wave['nom']}**.")
+
+    semaine = week_number_for_date(session_date, datetime.fromisoformat(wave["date_debut"]).date())
+
+    session_id = await create_completed_session(
+        db,
+        member_id=member["id"],
+        wave_id=wave["id"],
+        semaine=semaine,
+        session_date=session_date,
+        creneau=creneau,
+        canal_id=canal_id,
+        canal_nom=canal_nom,
+        debut=debut,
+        fin=fin,
+        objectif=objectif,
+        bilan=bilan,
+        blocages=blocages,
+    )
     return await get_by_id(db, session_id)
 
 
