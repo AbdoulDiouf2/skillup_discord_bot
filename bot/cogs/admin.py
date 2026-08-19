@@ -51,6 +51,73 @@ async def _safe_dm(member: discord.Member, content: str) -> bool:
         return False
 
 
+class SessionCreerModal(discord.ui.Modal, title="Créer une session (rattrapage)"):
+    objectif = discord.ui.TextInput(
+        label="Objectif de la session",
+        style=discord.TextStyle.paragraph,
+        max_length=1000,
+        required=True,
+    )
+    bilan = discord.ui.TextInput(
+        label="Bilan — qu'a fait le membre ?",
+        style=discord.TextStyle.paragraph,
+        max_length=1000,
+        required=True,
+    )
+    blocages = discord.ui.TextInput(
+        label="Blocages (optionnel)",
+        style=discord.TextStyle.paragraph,
+        max_length=1000,
+        required=False,
+    )
+
+    def __init__(
+        self,
+        utilisateur: discord.Member,
+        date_iso: str,
+        date_affichee: str,
+        creneau: str,
+        heure_debut: str,
+        heure_fin: str,
+        canal: discord.VoiceChannel | None,
+    ):
+        super().__init__()
+        self.utilisateur = utilisateur
+        self.date_iso = date_iso
+        self.date_affichee = date_affichee
+        self.creneau = creneau
+        self.heure_debut = heure_debut
+        self.heure_fin = heure_fin
+        self.canal = canal
+
+    async def on_submit(self, interaction: discord.Interaction):
+        async with get_connection() as db:
+            try:
+                session = await resolve_session_creer(
+                    db,
+                    None,
+                    str(self.utilisateur.id),
+                    self.date_iso,
+                    self.creneau,
+                    self.heure_debut,
+                    self.heure_fin,
+                    str(self.objectif),
+                    str(self.bilan),
+                    str(self.canal.id) if self.canal else None,
+                    self.canal.name if self.canal else None,
+                    str(self.blocages) if self.blocages else None,
+                )
+            except ResolutionError as e:
+                await interaction.response.send_message(str(e), ephemeral=True)
+                return
+
+        await interaction.response.send_message(
+            f"Session #{session['id']} créée pour {self.utilisateur.mention} — "
+            f"{self.date_affichee} {self.creneau} ({self.heure_debut}-{self.heure_fin}).",
+            ephemeral=True,
+        )
+
+
 class AdminCog(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
@@ -413,6 +480,11 @@ class AdminCog(commands.Cog):
         name="session-creer",
         description="[Admin] Crée une session complète pour un membre (rattrapage)",
     )
+    @app_commands.describe(
+        date_session="Format JJ/MM/AAAA (ex: 18/08/2026)",
+        heure_debut="Format HH:MM, 24h (ex: 19:00)",
+        heure_fin="Format HH:MM, 24h (ex: 21:00)",
+    )
     @app_commands.choices(
         creneau=[app_commands.Choice(name=c, value=c) for c in CRENEAUX]
     )
@@ -426,38 +498,31 @@ class AdminCog(commands.Cog):
         creneau: app_commands.Choice[str],
         heure_debut: str,
         heure_fin: str,
-        objectif: str,
-        bilan: str,
         canal: discord.VoiceChannel | None = None,
-        blocages: str | None = None,
     ):
         """Rattrapage admin : crée une session déjà clôturée, pour couvrir une
         séance tenue avant que le bot ne soit membre du serveur (ou toute session
-        qu'un membre n'a pas pu saisir lui-même via `/session-start` + `/session-end`)."""
-        async with get_connection() as db:
-            try:
-                session = await resolve_session_creer(
-                    db,
-                    None,
-                    str(utilisateur.id),
-                    date_session,
-                    creneau.value,
-                    heure_debut,
-                    heure_fin,
-                    objectif,
-                    bilan,
-                    str(canal.id) if canal else None,
-                    canal.name if canal else None,
-                    blocages,
-                )
-            except ResolutionError as e:
-                await interaction.response.send_message(str(e), ephemeral=True)
-                return
+        qu'un membre n'a pas pu saisir lui-même via `/session-start` + `/session-end`).
+        Objectif/bilan/blocages saisis dans une pop-up (comme /session-start),
+        pour rester confortable sur du texte long."""
+        try:
+            session_date = datetime.strptime(date_session, "%d/%m/%Y").date()
+        except ValueError:
+            await interaction.response.send_message(
+                "Date invalide. Format attendu : JJ/MM/AAAA (ex: 18/08/2026).", ephemeral=True
+            )
+            return
 
-        await interaction.response.send_message(
-            f"Session #{session['id']} créée pour {utilisateur.mention} — "
-            f"{date_session} {creneau.value} ({heure_debut}-{heure_fin}).",
-            ephemeral=True,
+        await interaction.response.send_modal(
+            SessionCreerModal(
+                utilisateur,
+                session_date.isoformat(),
+                date_session,
+                creneau.value,
+                heure_debut,
+                heure_fin,
+                canal,
+            )
         )
 
     @app_commands.command(

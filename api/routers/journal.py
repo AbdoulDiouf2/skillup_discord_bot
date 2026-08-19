@@ -113,6 +113,7 @@ async def get_binome_journal(
 
     return BinomeJournalResponse(
         partenaire_nom=partner["nom"],
+        partenaire_discord_id=partner["discord_id"],
         label=f"vague {wave['nom']}, semaine {target_semaine}",
         sessions=[SessionOut(**dict(s)) for s in sessions],
     )

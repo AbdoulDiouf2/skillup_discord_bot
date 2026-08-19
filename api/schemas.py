@@ -32,6 +32,7 @@ class JournalResponse(BaseModel):
 
 class BinomeJournalResponse(BaseModel):
     partenaire_nom: str
+    partenaire_discord_id: str
     label: str
     sessions: list[SessionOut]
 
