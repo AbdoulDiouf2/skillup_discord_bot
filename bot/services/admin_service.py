@@ -116,16 +116,18 @@ async def resolve_session_creer(
     date_session: str,
     creneau: str,
     heure_debut: str,
-    heure_fin: str,
-    objectif: str,
-    bilan: str,
+    heure_fin: str | None,
+    objectif: str | None,
+    bilan: str | None,
     canal_id: str | None,
     canal_nom: str | None,
     blocages: str | None,
 ):
     """Crée une session déjà clôturée pour un membre — rattrapage admin (ex. séance
-    tenue avant que le bot ne soit sur le serveur). Mêmes règles que la commande
-    Discord `/session-creer`. Retourne la session créée."""
+    tenue avant que le bot ne soit sur le serveur). Seuls membre/date/créneau/heure
+    de début sont obligatoires : heure de fin, objectif et bilan peuvent manquer sur
+    un rattrapage approximatif (statut alors `incomplète`, cf. `create_completed_session`).
+    Mêmes règles que la commande Discord `/session-creer`. Retourne la session créée."""
     # Format libre (pas restreint à CRENEAUX) : le rattrapage doit pouvoir couvrir des
     # créneaux hors de la liste standard (ex. "17h-19h", déjà présents dans l'historique
     # importé). On valide juste la forme "HHh-HHh" pour éviter une saisie incohérente.
@@ -141,12 +143,14 @@ async def resolve_session_creer(
     try:
         hh, mm = map(int, heure_debut.split(":"))
         debut = datetime(y, m, d, hh, mm, tzinfo=TZ)
-        fh, fm = map(int, heure_fin.split(":"))
-        fin = datetime(y, m, d, fh, fm, tzinfo=TZ)
+        fin = None
+        if heure_fin:
+            fh, fm = map(int, heure_fin.split(":"))
+            fin = datetime(y, m, d, fh, fm, tzinfo=TZ)
     except ValueError as e:
         raise ResolutionError("Heure invalide — format attendu HH:MM.") from e
 
-    if fin <= debut:
+    if fin is not None and fin <= debut:
         raise ResolutionError("L'heure de fin doit être après l'heure de début.")
 
     wave = await _resolve_wave(db, vague_id)

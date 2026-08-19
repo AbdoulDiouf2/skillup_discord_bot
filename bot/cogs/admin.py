@@ -53,16 +53,16 @@ async def _safe_dm(member: discord.Member, content: str) -> bool:
 
 class SessionCreerModal(discord.ui.Modal, title="Créer une session (rattrapage)"):
     objectif = discord.ui.TextInput(
-        label="Objectif de la session",
+        label="Objectif de la session (optionnel)",
         style=discord.TextStyle.paragraph,
         max_length=1000,
-        required=True,
+        required=False,
     )
     bilan = discord.ui.TextInput(
-        label="Bilan — qu'a fait le membre ?",
+        label="Bilan (optionnel) — sinon statut incomplète",
         style=discord.TextStyle.paragraph,
         max_length=1000,
-        required=True,
+        required=False,
     )
     blocages = discord.ui.TextInput(
         label="Blocages (optionnel)",
@@ -78,7 +78,7 @@ class SessionCreerModal(discord.ui.Modal, title="Créer une session (rattrapage)
         date_affichee: str,
         creneau: str,
         heure_debut: str,
-        heure_fin: str,
+        heure_fin: str | None,
         canal: discord.VoiceChannel | None,
     ):
         super().__init__()
@@ -101,8 +101,8 @@ class SessionCreerModal(discord.ui.Modal, title="Créer une session (rattrapage)
                     self.creneau,
                     self.heure_debut,
                     self.heure_fin,
-                    str(self.objectif),
-                    str(self.bilan),
+                    str(self.objectif) if self.objectif else None,
+                    str(self.bilan) if self.bilan else None,
                     str(self.canal.id) if self.canal else None,
                     self.canal.name if self.canal else None,
                     str(self.blocages) if self.blocages else None,
@@ -111,9 +111,11 @@ class SessionCreerModal(discord.ui.Modal, title="Créer une session (rattrapage)
                 await interaction.response.send_message(str(e), ephemeral=True)
                 return
 
+        heure_fin_str = self.heure_fin or "?"
         await interaction.response.send_message(
             f"Session #{session['id']} créée pour {self.utilisateur.mention} — "
-            f"{self.date_affichee} {self.creneau} ({self.heure_debut}-{self.heure_fin}).",
+            f"{self.date_affichee} {self.creneau} ({self.heure_debut}-{heure_fin_str}) "
+            f"— statut **{session['statut']}**.",
             ephemeral=True,
         )
 
@@ -483,7 +485,7 @@ class AdminCog(commands.Cog):
     @app_commands.describe(
         date_session="Format JJ/MM/AAAA (ex: 18/08/2026)",
         heure_debut="Format HH:MM, 24h (ex: 19:00)",
-        heure_fin="Format HH:MM, 24h (ex: 21:00)",
+        heure_fin="Optionnel — format HH:MM, 24h (ex: 21:00)",
     )
     @app_commands.choices(
         creneau=[app_commands.Choice(name=c, value=c) for c in CRENEAUX]
@@ -497,7 +499,7 @@ class AdminCog(commands.Cog):
         date_session: str,
         creneau: app_commands.Choice[str],
         heure_debut: str,
-        heure_fin: str,
+        heure_fin: str | None = None,
         canal: discord.VoiceChannel | None = None,
     ):
         """Rattrapage admin : crée une session déjà clôturée, pour couvrir une

@@ -64,20 +64,27 @@ async def create_completed_session(
     canal_id: str | None,
     canal_nom: str | None,
     debut: datetime,
-    fin: datetime,
-    objectif: str,
-    bilan: str,
+    fin: datetime | None,
+    objectif: str | None,
+    bilan: str | None,
     blocages: str | None,
 ) -> int:
-    """Crée directement une session complète (debut + fin + bilan) — pour un
-    rattrapage admin (ex. session tenue avant que le bot ne soit sur le serveur),
-    contrairement à `start_session` qui laisse la session ouverte pour clôture
-    ultérieure par le membre lui-même."""
+    """Crée directement une session déjà clôturée — pour un rattrapage admin (ex.
+    session tenue avant que le bot ne soit sur le serveur), contrairement à
+    `start_session` qui laisse la session ouverte pour clôture ultérieure par le
+    membre lui-même.
+
+    `fin` par défaut = `debut` (jamais NULL) : `idx_one_open_session` n'autorise
+    qu'une seule session à `fin IS NULL` par membre — la laisser NULL ici ferait
+    passer ce rattrapage pour une session activement en cours côté `/session-start`.
+    `statut` dérivé de la présence d'un bilan : `complète` si renseigné, sinon
+    `incomplète` (même convention que l'historique importé)."""
+    statut = "complète" if bilan else "incomplète"
     cur = await db.execute(
         """INSERT INTO sessions
            (member_id, wave_id, semaine, date, creneau, canal_id, canal_nom,
             debut, fin, objectif, bilan, blocages, statut)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'complète')""",
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
         (
             member_id,
             wave_id,
@@ -87,10 +94,11 @@ async def create_completed_session(
             canal_id,
             canal_nom,
             debut.isoformat(),
-            fin.isoformat(),
-            objectif,
+            (fin or debut).isoformat(),
+            objectif or "",
             bilan,
             blocages,
+            statut,
         ),
     )
     await db.commit()
