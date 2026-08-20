@@ -1,5 +1,5 @@
 import re
-from datetime import datetime
+from datetime import datetime, timedelta
 
 import discord
 from discord import app_commands
@@ -14,6 +14,7 @@ from bot.db.sessions import (
     end_session,
     get_by_id,
     get_open_session,
+    get_recent_incomplete_session,
     list_distinct_creneaux,
     list_recent_by_member,
     start_session,
@@ -23,6 +24,10 @@ from bot.db.waves import get_active_wave
 from bot.services.weeks import week_number_for_date
 
 CRENEAU_FORMAT = re.compile(r"\d{1,2}h-\d{1,2}h")
+
+# Fenêtre pendant laquelle /session-end peut encore rattraper une session auto-clôturée
+# par la RG-16 (débordement sur minuit) — au-delà, on considère la session vraiment oubliée.
+RATTRAPAGE_FENETRE = timedelta(hours=4)
 
 
 def _sort_creneaux(creneaux: set[str]) -> list[str]:
@@ -147,6 +152,7 @@ class SessionEndModal(discord.ui.Modal, title="Clôturer ta session"):
     )
 
     async def on_submit(self, interaction: discord.Interaction):
+        now = datetime.now(TZ)
         async with get_connection() as db:
             wave = await get_active_wave(db)
             if wave is None:
@@ -161,17 +167,21 @@ class SessionEndModal(discord.ui.Modal, title="Clôturer ta session"):
                 return
 
             open_session = await get_open_session(db, member["id"])
-            if open_session is None:
-                await interaction.response.send_message(
-                    "Tu n'as pas de session ouverte.", ephemeral=True
+            rattrapage = open_session is None
+            if rattrapage:
+                open_session = await get_recent_incomplete_session(
+                    db, member["id"], now - RATTRAPAGE_FENETRE
                 )
-                return
+                if open_session is None:
+                    await interaction.response.send_message(
+                        "Tu n'as pas de session ouverte.", ephemeral=True
+                    )
+                    return
+            else:
+                channel = await _require_coworking_channel(interaction, db, wave["id"], "clôturer")
+                if channel is None:
+                    return
 
-            channel = await _require_coworking_channel(interaction, db, wave["id"], "clôturer")
-            if channel is None:
-                return
-
-            now = datetime.now(TZ)
             blocages_val = str(self.blocages) if self.blocages else None
             await end_session(db, open_session["id"], now, str(self.bilan), blocages_val)
 
@@ -182,6 +192,8 @@ class SessionEndModal(discord.ui.Modal, title="Clôturer ta session"):
             texte = f"{interaction.user.mention} clôture sa session — durée **{duree_str}**.\nBilan : {self.bilan}"
             if blocages_val:
                 texte += f"\nBlocages : {blocages_val}"
+            if rattrapage:
+                texte += "\n-# Session rattrapée après la clôture automatique de minuit (RG-16)."
             await interaction.response.send_message(texte)
 
 

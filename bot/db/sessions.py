@@ -22,6 +22,22 @@ async def get_open_session(db: aiosqlite.Connection, member_id: int) -> aiosqlit
         return await cur.fetchone()
 
 
+async def get_recent_incomplete_session(
+    db: aiosqlite.Connection, member_id: int, since: datetime
+) -> aiosqlite.Row | None:
+    """Dernière session du membre auto-clôturée par RG-16 (statut 'incomplète', bilan
+    jamais renseigné) depuis `since` — permet à /session-end de rattraper une session
+    qui a débordé sur la clôture de minuit au lieu de la laisser perdue."""
+    db.row_factory = aiosqlite.Row
+    async with db.execute(
+        """SELECT * FROM sessions
+           WHERE member_id = ? AND statut = 'incomplète' AND bilan IS NULL AND fin >= ?
+           ORDER BY fin DESC LIMIT 1""",
+        (member_id, since.isoformat()),
+    ) as cur:
+        return await cur.fetchone()
+
+
 async def start_session(
     db: aiosqlite.Connection,
     member_id: int,
