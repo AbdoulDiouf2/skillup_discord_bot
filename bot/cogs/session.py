@@ -173,9 +173,19 @@ class SessionEndModal(discord.ui.Modal, title="Clôturer ta session"):
                     db, member["id"], now - RATTRAPAGE_FENETRE
                 )
                 if open_session is None:
-                    await interaction.response.send_message(
-                        "Tu n'as pas de session ouverte.", ephemeral=True
-                    )
+                    perimee = await get_recent_incomplete_session(db, member["id"])
+                    if perimee is not None:
+                        await interaction.response.send_message(
+                            f"Ta session du {perimee['date']} (créneau {perimee['creneau']}) a été "
+                            f"clôturée automatiquement et le délai de rattrapage (4h) est dépassé. "
+                            f"Renseigne ton bilan toi-même avec `/session-corriger` "
+                            f"(session #{perimee['id']}, champ `bilan`).",
+                            ephemeral=True,
+                        )
+                    else:
+                        await interaction.response.send_message(
+                            "Tu n'as pas de session ouverte.", ephemeral=True
+                        )
                     return
             else:
                 channel = await _require_coworking_channel(interaction, db, wave["id"], "clôturer")

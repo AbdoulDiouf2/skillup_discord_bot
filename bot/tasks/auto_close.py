@@ -1,5 +1,5 @@
 import logging
-from datetime import datetime, time
+from datetime import datetime
 
 from discord.ext import tasks
 
@@ -9,10 +9,10 @@ from bot.db.sessions_admin import close_stale_open_sessions
 
 log = logging.getLogger("skillup")
 
-MINUIT = time(hour=0, minute=0, tzinfo=TZ)
+INTERVALLE_VERIFICATION_MINUTES = 15
 
 
-@tasks.loop(time=MINUIT)
+@tasks.loop(minutes=INTERVALLE_VERIFICATION_MINUTES)
 async def auto_close_sessions():
     now = datetime.now(TZ)
     async with get_connection() as db:
