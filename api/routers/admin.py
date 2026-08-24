@@ -231,7 +231,7 @@ async def post_membre_objectif_sync(discord_id: str, vague: int | None = None, d
     except discord_client.DiscordAPIError as e:
         raise HTTPException(503, str(e)) from e
     if contenu is None:
-        raise HTTPException(404, "Post objectif introuvable sur Discord (supprimé ?).")
+        raise HTTPException(404, "Post objectif introuvable ou vide sur Discord (supprimé, ou aucun texte/embed exploitable).")
 
     updated = await resolve_membre_objectif_sync_apply(db, membre["id"], contenu)
     return MemberOut(**dict(updated))
@@ -256,11 +256,13 @@ async def post_membres_objectif_sync(vague: int | None = None, db=Depends(get_db
             continue
         if contenu is None:
             resultats.append(
-                ObjectifSyncResultOut(discord_id=m["discord_id"], nom=m["nom"], ok=False, message="Post introuvable sur Discord.")
+                ObjectifSyncResultOut(discord_id=m["discord_id"], nom=m["nom"], ok=False, message="Post introuvable ou vide sur Discord.")
             )
             continue
         await resolve_membre_objectif_sync_apply(db, m["id"], contenu)
-        resultats.append(ObjectifSyncResultOut(discord_id=m["discord_id"], nom=m["nom"], ok=True, message="Synchronisé."))
+        resultats.append(
+            ObjectifSyncResultOut(discord_id=m["discord_id"], nom=m["nom"], ok=True, message=f"Synchronisé ({len(contenu)} caractères).")
+        )
 
     return ObjectifsSyncResponse(resultats=resultats)
 

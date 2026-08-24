@@ -196,13 +196,22 @@ async def get_thread_starter_content(thread_id: str) -> str | None:
     """Contenu du message de lancement d'un fil de forum — côté API Discord, ce message
     partage le même ID que le fil lui-même (GET /channels/{thread_id}/messages/{thread_id}).
     None si introuvable (fil ou message supprimé) plutôt qu'une exception — l'appelant
-    décide comment le signaler."""
+    décide comment le signaler. Si `content` est vide (post rédigé avec un embed plutôt
+    qu'en texte brut — cas de certains posts créés à la main avant l'automatisation),
+    retombe sur la description du premier embed."""
     resp = await _get_with_retry(
         f"/channels/{thread_id}/messages/{thread_id}", None, "message objectif", allow_404=True
     )
     if resp.status_code == 404:
         return None
-    return resp.json()["content"]
+    data = resp.json()
+    content = data.get("content") or ""
+    if content.strip():
+        return content
+    embeds = data.get("embeds") or []
+    if embeds and embeds[0].get("description"):
+        return embeds[0]["description"]
+    return content or None
 
 
 async def send_dm(discord_id: str, content: str) -> bool:
