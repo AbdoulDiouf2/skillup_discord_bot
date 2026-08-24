@@ -39,12 +39,15 @@ from api.schemas import (
     SessionOut,
     SessionsListResponse,
     SessionSupprimerResponse,
+    ThreadBilanCollectifRequest,
     VagueAdminOut,
     VagueCreerRequest,
 )
 from bot.services.admin_service import (
     resolve_ai_settings_ecrire,
     resolve_ai_settings_lire,
+    resolve_bilan_collectif_semaine_ecrire,
+    resolve_bilan_collectif_semaine_lire,
     resolve_bilan_semaine_ecrire,
     resolve_bilan_semaine_lire,
     resolve_bilans_semaine_lister,
@@ -57,6 +60,7 @@ from bot.services.admin_service import (
     resolve_membre_ajouter,
     resolve_membre_editer,
     resolve_membre_lier_thread,
+    resolve_vague_lier_thread_bilan_collectif,
     resolve_wave_et_membre,
     resolve_membre_objectif_sync_apply,
     resolve_membre_objectif_sync_prepare,
@@ -132,6 +136,20 @@ async def patch_vague_cloturer(vague_id: int | None = None, db=Depends(get_db)):
     """Clôture une vague (par défaut la vague active). Équivalent API de /vague-cloturer."""
     try:
         wave = await resolve_vague_cloturer(db, vague_id)
+    except ResolutionError as e:
+        raise HTTPException(404, str(e)) from e
+    return VagueAdminOut(**dict(wave))
+
+
+@router.patch("/vagues/{vague_id}/thread-bilan-collectif", response_model=VagueAdminOut)
+async def patch_vague_lier_thread_bilan_collectif(
+    vague_id: int, body: ThreadBilanCollectifRequest, db=Depends(get_db)
+):
+    """Rattache le thread Discord du bilan collectif hebdomadaire d'une vague (ex.
+    "Bilans hebdos" dans le forum objectifs) — équivalent, au niveau vague, de
+    /membre-lier-thread."""
+    try:
+        wave = await resolve_vague_lier_thread_bilan_collectif(db, vague_id, body.lien_ou_id)
     except ResolutionError as e:
         raise HTTPException(404, str(e)) from e
     return VagueAdminOut(**dict(wave))
@@ -576,6 +594,47 @@ async def put_bilan_vague_endpoint(
     except ResolutionError as e:
         raise HTTPException(404, str(e)) from e
     return _bilan_texte_out(bilan)
+
+
+@router.get("/bilan-collectif-semaine", response_model=BilanTexteOut | None)
+async def get_bilan_collectif_semaine_endpoint(semaine: int, vague: int | None = None, db=Depends(get_db)):
+    """Bilan collectif hebdomadaire de la vague — ressenti exprimé oralement par les
+    membres en réunion, transcrit par l'admin. Pas de résumé informatif ni de
+    suggestion IA pour ce niveau (rien en base ne capture ce ressenti)."""
+    try:
+        _wave, bilan = await resolve_bilan_collectif_semaine_lire(db, vague, semaine)
+    except ResolutionError as e:
+        raise HTTPException(404, str(e)) from e
+    return _bilan_texte_out(bilan)
+
+
+@router.put("/bilan-collectif-semaine", response_model=BilanTexteOut)
+async def put_bilan_collectif_semaine_endpoint(
+    body: BilanTexteRequest,
+    semaine: int,
+    vague: int | None = None,
+    db=Depends(get_db),
+    caller_id: str = Depends(get_caller_discord_id),
+):
+    """Écrit (upsert) le bilan collectif hebdomadaire de la vague. Si `body.poster`
+    (défaut True) et qu'un thread est rattaché (`waves.thread_bilan_collectif_id`,
+    cf. PATCH /vagues/{id}/thread-bilan-collectif), poste aussi le texte en réponse
+    dans ce fil — best-effort, même logique que le bilan hebdo membre."""
+    try:
+        wave, bilan = await resolve_bilan_collectif_semaine_ecrire(db, vague, semaine, body.valeur, caller_id)
+    except ResolutionError as e:
+        raise HTTPException(404, str(e)) from e
+
+    poste_discord = None
+    if body.poster:
+        thread_id = wave["thread_bilan_collectif_id"]
+        if thread_id:
+            texte_discord = f"**Bilan collectif — {wave['nom']}, semaine {semaine}**\n\n{body.valeur}"
+            poste_discord = await discord_client.post_channel_message(thread_id, texte_discord)
+        else:
+            poste_discord = False
+
+    return _bilan_texte_out(bilan, poste_discord)
 
 
 @router.post("/members/{discord_id}/bilan-semaine/suggerer", response_model=BilanSuggestionResponse)

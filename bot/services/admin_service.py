@@ -4,10 +4,12 @@ from datetime import date, datetime
 from bot.config import TZ
 from bot.db.ai_settings import get_ai_settings, update_ai_settings
 from bot.db.bilans import (
+    get_bilan_collectif_semaine,
     get_bilan_semaine,
     get_bilan_vague,
     list_bilans_semaine_by_wave,
     list_bilans_vague_by_wave,
+    upsert_bilan_collectif_semaine,
     upsert_bilan_semaine,
     upsert_bilan_vague,
 )
@@ -24,6 +26,7 @@ from bot.db.waves import (
     get_active_wave,
     get_wave_by_id,
     list_waves,
+    set_thread_bilan_collectif_id,
 )
 from bot.services.errors import ResolutionError
 from bot.services.weeks import week_number_for_date
@@ -464,6 +467,35 @@ async def resolve_membre_lier_thread(db, vague_id: int | None, discord_id: str, 
         raise ResolutionError(f"Ce membre n'est pas enregistré dans la vague **{wave['nom']}**.")
     await set_thread_objectif_id(db, membre["id"], str(thread_id))
     return wave, await get_member_by_id(db, membre["id"])
+
+
+async def resolve_vague_lier_thread_bilan_collectif(db, vague_id: int | None, lien_ou_id: str):
+    """Rattache le thread Discord du bilan collectif hebdomadaire d'une vague (ex.
+    "Bilans hebdos" dans le forum objectifs) — équivalent, au niveau vague, de
+    resolve_membre_lier_thread."""
+    thread_id = parse_thread_id(lien_ou_id)
+    if thread_id is None:
+        raise ResolutionError("Lien ou ID de post invalide.")
+    wave = await _resolve_wave(db, vague_id)
+    await set_thread_bilan_collectif_id(db, wave["id"], str(thread_id))
+    return await get_wave_by_id(db, wave["id"])
+
+
+async def resolve_bilan_collectif_semaine_lire(db, vague_id: int | None, semaine: int):
+    """Retourne (wave, texte du bilan collectif ou None) pour une semaine donnée."""
+    wave = await _resolve_wave(db, vague_id)
+    bilan = await get_bilan_collectif_semaine(db, wave["id"], semaine)
+    return wave, bilan
+
+
+async def resolve_bilan_collectif_semaine_ecrire(db, vague_id: int | None, semaine: int, texte: str, ecrit_par: str):
+    """Écrit (upsert) le bilan collectif hebdomadaire d'une vague — transcription du
+    ressenti exprimé oralement par les membres en réunion, rédigée par l'admin.
+    Retourne (wave, bilan)."""
+    wave = await _resolve_wave(db, vague_id)
+    updated_at = datetime.now(TZ).isoformat()
+    await upsert_bilan_collectif_semaine(db, wave["id"], semaine, texte, ecrit_par, updated_at)
+    return wave, await get_bilan_collectif_semaine(db, wave["id"], semaine)
 
 
 async def resolve_session_supprimer(db, session_id: int):

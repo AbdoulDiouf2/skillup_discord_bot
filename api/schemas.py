@@ -103,6 +103,10 @@ class AiSettingsOut(BaseModel):
     configured_providers: list[str] = []
 
 
+class ThreadBilanCollectifRequest(BaseModel):
+    lien_ou_id: str
+
+
 class AiModelsResponse(BaseModel):
     provider: str
     models: list[str]
@@ -232,6 +236,7 @@ class VagueAdminOut(BaseModel):
     date_debut: str
     date_fin: str
     statut: str
+    thread_bilan_collectif_id: str | None = None
 
 
 class VaguesListResponse(BaseModel):

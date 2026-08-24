@@ -83,6 +83,29 @@ async def list_bilans_vague_by_wave(db: aiosqlite.Connection, wave_id: int) -> l
         return await cur.fetchall()
 
 
+async def get_bilan_collectif_semaine(db: aiosqlite.Connection, wave_id: int, semaine: int) -> aiosqlite.Row | None:
+    db.row_factory = aiosqlite.Row
+    async with db.execute(
+        "SELECT * FROM bilans_collectifs_semaine WHERE wave_id = ? AND semaine = ?",
+        (wave_id, semaine),
+    ) as cur:
+        return await cur.fetchone()
+
+
+async def upsert_bilan_collectif_semaine(
+    db: aiosqlite.Connection, wave_id: int, semaine: int, texte: str, ecrit_par: str, updated_at: str
+) -> None:
+    await db.execute(
+        "INSERT INTO bilans_collectifs_semaine (wave_id, semaine, texte, ecrit_par_discord_id, updated_at) "
+        "VALUES (?, ?, ?, ?, ?) "
+        "ON CONFLICT (wave_id, semaine) DO UPDATE SET "
+        "texte = excluded.texte, ecrit_par_discord_id = excluded.ecrit_par_discord_id, "
+        "updated_at = excluded.updated_at",
+        (wave_id, semaine, texte, ecrit_par, updated_at),
+    )
+    await db.commit()
+
+
 async def get_bilan_vague(
     db: aiosqlite.Connection, member_id: int, wave_id: int
 ) -> aiosqlite.Row | None:

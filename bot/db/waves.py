@@ -72,3 +72,8 @@ async def close_wave(db: aiosqlite.Connection, wave_id: int | None = None) -> ai
     await db.execute("UPDATE waves SET statut = 'cloturee' WHERE id = ?", (wave_id,))
     await db.commit()
     return await get_wave_by_id(db, wave_id)
+
+
+async def set_thread_bilan_collectif_id(db: aiosqlite.Connection, wave_id: int, thread_id: str) -> None:
+    await db.execute("UPDATE waves SET thread_bilan_collectif_id = ? WHERE id = ?", (thread_id, wave_id))
+    await db.commit()

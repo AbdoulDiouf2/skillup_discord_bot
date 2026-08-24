@@ -141,3 +141,23 @@ CREATE TABLE IF NOT EXISTS ai_settings (
 INSERT INTO ai_settings (id, enabled, provider, model)
 VALUES (1, TRUE, 'anthropic', 'claude-haiku-4-5-20251001')
 ON CONFLICT (id) DO NOTHING;
+
+-- Thread Discord du bilan collectif de la vague (forum objectifs, ex. "Bilans
+-- hebdos") — distinct de members.thread_objectif_id, rattaché à la vague entière,
+-- pas à un membre.
+ALTER TABLE waves ADD COLUMN IF NOT EXISTS thread_bilan_collectif_id TEXT;
+
+-- Bilan collectif hebdomadaire — ressenti exprimé oralement par les membres en
+-- réunion, transcrit par l'admin. Un seul par (vague, semaine), pas de member_id
+-- (contrairement à bilans_semaine) : ça concerne le fonctionnement du groupe, pas
+-- un membre en particulier. Pas de résumé informatif ni de suggestion IA pour ce
+-- niveau — rien en base ne capture ce ressenti oral.
+CREATE TABLE IF NOT EXISTS bilans_collectifs_semaine (
+    id                    SERIAL PRIMARY KEY,
+    wave_id               INTEGER NOT NULL REFERENCES waves(id),
+    semaine               INTEGER NOT NULL,
+    texte                 TEXT NOT NULL,
+    ecrit_par_discord_id  TEXT NOT NULL,
+    updated_at            TEXT NOT NULL,
+    UNIQUE (wave_id, semaine)
+);
