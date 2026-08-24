@@ -22,6 +22,7 @@ from bot.services.admin_service import resolve_bilan_semaine_lire
 from bot.services.journal_service import (
     resolve_binome_journal,
     resolve_member_sessions,
+    resolve_member_sessions_vague,
     resolve_objectif_vague_set,
     resolve_own_member,
     resolve_session_corriger_self,
@@ -133,6 +134,25 @@ async def get_bilan(
         sessions, nom, label, _show_wave, _member = await resolve_member_sessions(
             db, discord_id, vague, semaine
         )
+    except ResolutionError as e:
+        raise HTTPException(404, str(e)) from e
+
+    resume = summarize_sessions(sessions)
+    return BilanResponse(nom=nom, label=label, **resume)
+
+
+@router.get("/bilan-vague-info", response_model=BilanResponse)
+async def get_bilan_vague_info(
+    discord_id: str,
+    vague: int,
+    db=Depends(get_db),
+    _caller: str = Depends(require_self_or_admin()),
+):
+    """Résumé informatif agrégé sur TOUTE la vague (toutes semaines confondues) —
+    distinct de `/bilan?vague=X` qui, sans `semaine`, retombe sur la semaine courante
+    seulement. Sert le panneau "résumé" du bilan de vague admin."""
+    try:
+        sessions, nom, label, _member = await resolve_member_sessions_vague(db, discord_id, vague)
     except ResolutionError as e:
         raise HTTPException(404, str(e)) from e
 

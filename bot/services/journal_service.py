@@ -4,7 +4,7 @@ from bot.config import TZ
 from bot.db.binomes import get_partner_id
 from bot.db.members import get_member, get_member_all_waves, get_member_by_id, update_objectif
 from bot.db.sessions import delete_session, get_by_id as get_session_by_id
-from bot.db.sessions import list_by_member_ids_and_semaine, list_by_member_week
+from bot.db.sessions import list_by_member_ids_and_semaine, list_by_member_wave, list_by_member_week
 from bot.db.sessions import update_field as update_session_field
 from bot.db.waves import get_active_wave, get_wave_by_id, list_waves
 from bot.services.admin_service import SESSION_CHAMPS_EDITABLES
@@ -54,6 +54,21 @@ async def resolve_member_sessions(db, discord_id: str, vague_id: int | None, sem
         target_semaine = week_number_for_date(datetime.now(TZ).date(), wave_start)
     sessions = await list_by_member_week(db, member["id"], wave["id"], target_semaine)
     return sessions, member["nom"], f"vague {wave['nom']}, semaine {target_semaine}", False, member
+
+
+async def resolve_member_sessions_vague(db, discord_id: str, vague_id: int):
+    """Résout (sessions, nom_affiché, label, member) pour TOUTE la vague (toutes
+    semaines confondues) — distinct de resolve_member_sessions, qui retombe sur la
+    semaine courante quand `semaine` est omis. Sert au résumé "bilan de vague" (agrégat
+    complet), pas au bilan hebdo."""
+    wave = await get_wave_by_id(db, vague_id)
+    if wave is None:
+        raise ResolutionError("Vague introuvable.")
+    member = await get_member(db, discord_id, wave["id"])
+    if member is None:
+        raise ResolutionError(f"Ce membre n'est pas enregistré dans la vague **{wave['nom']}**.")
+    sessions = await list_by_member_wave(db, member["id"], wave["id"])
+    return sessions, member["nom"], f"vague {wave['nom']} (toute la vague)", member
 
 
 async def resolve_binome_journal(db, discord_id: str, vague_id: int | None, semaine: int | None):

@@ -234,3 +234,15 @@ async def list_by_member_week(
         (member_id, wave_id, semaine),
     ) as cur:
         return await cur.fetchall()
+
+
+async def list_by_member_wave(db: aiosqlite.Connection, member_id: int, wave_id: int) -> list[aiosqlite.Row]:
+    """Toutes les sessions d'un membre pour une vague, TOUTES semaines confondues —
+    distinct de list_by_member_week (une semaine précise) : sert au résumé "bilan de
+    vague" (agrégat de toute la vague), pas au bilan hebdo."""
+    db.row_factory = aiosqlite.Row
+    async with db.execute(
+        "SELECT * FROM sessions WHERE member_id = ? AND wave_id = ? ORDER BY debut ASC",
+        (member_id, wave_id),
+    ) as cur:
+        return await cur.fetchall()
