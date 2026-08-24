@@ -351,6 +351,17 @@ async def resolve_salons_lister(db, vague_id: int | None, actif_seulement: bool)
     return await list_channels(db, vague_id, actif_seulement)
 
 
+async def resolve_wave_et_membre(db, vague_id: int | None, discord_id: str):
+    """Résout (wave, membre) — factorise le couple _resolve_wave + get_member répété
+    par la plupart des resolve_bilan_*. Lève ResolutionError si le membre n'est pas
+    enregistré dans la vague résolue."""
+    wave = await _resolve_wave(db, vague_id)
+    membre = await get_member(db, discord_id, wave["id"])
+    if membre is None:
+        raise ResolutionError(f"Ce membre n'est pas enregistré dans la vague **{wave['nom']}**.")
+    return wave, membre
+
+
 async def resolve_bilan_semaine_lire(db, vague_id: int | None, discord_id: str, semaine: int):
     """Retourne (wave, texte du bilan hebdo ou None). Mêmes règles de résolution de
     membre que /membre-editer (membre doit être enregistré dans la vague résolue)."""

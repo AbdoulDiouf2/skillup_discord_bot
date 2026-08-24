@@ -82,6 +82,10 @@ class BilansVagueListResponse(BaseModel):
     bilans: list[BilanMembreOut]
 
 
+class BilanSuggestionResponse(BaseModel):
+    suggestion: str
+
+
 class MemberOut(BaseModel):
     id: int
     discord_id: str

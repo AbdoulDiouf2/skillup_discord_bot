@@ -36,7 +36,12 @@ DISCORD_TOKEN=<token bot PROD, Developer Portal>
 GUILD_ID=<ID serveur Alumni CPS prod>
 DATABASE_URL=postgresql://user:password@host/dbname?sslmode=require   # Neon, même base pour bot ET api
 API_KEY=<clé partagée avec CPS Connect, header X-API-Key>
+ANTHROPIC_API_KEY=<clé API Anthropic — suggestion IA des bilans, api/anthropic_client.py>
 ```
+
+`ANTHROPIC_API_KEY` n'est utilisée que côté `skillup-api` (jamais exposée à Firebase
+ni au frontend) — sert uniquement à générer un brouillon de bilan à la demande de
+l'admin (bouton "Générer une suggestion (IA)"), jamais d'appel automatique.
 
 `DATABASE_URL` et `API_KEY` **doivent être identiques** entre le bot et l'API
 (même `.env`, chargé par les deux services) — sinon incohérence de données ou

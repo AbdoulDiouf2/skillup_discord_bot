@@ -2,11 +2,12 @@ from datetime import date
 
 from fastapi import APIRouter, Depends, HTTPException
 
-from api import discord_client
+from api import anthropic_client, discord_client
 from api.deps import get_db, get_caller_discord_id, require_admin
 from api.schemas import (
     BilanMembreOut,
     BilansSemaineListResponse,
+    BilanSuggestionResponse,
     BilansVagueListResponse,
     BilanTexteOut,
     BilanTexteRequest,
@@ -50,6 +51,7 @@ from bot.services.admin_service import (
     resolve_membre_ajouter,
     resolve_membre_editer,
     resolve_membre_lier_thread,
+    resolve_wave_et_membre,
     resolve_membre_objectif_sync_apply,
     resolve_membre_objectif_sync_prepare,
     resolve_membres_objectif_sync_prepare,
@@ -65,6 +67,7 @@ from bot.services.admin_service import (
     resolve_vague_cloturer,
     resolve_vague_creer,
 )
+from bot.services.bilan_ai_service import build_bilan_semaine_prompt, build_bilan_vague_prompt
 from bot.services.errors import ResolutionError
 
 router = APIRouter(tags=["admin"], dependencies=[Depends(require_admin)])
@@ -555,3 +558,38 @@ async def put_bilan_vague_endpoint(
     except ResolutionError as e:
         raise HTTPException(404, str(e)) from e
     return _bilan_texte_out(bilan)
+
+
+@router.post("/members/{discord_id}/bilan-semaine/suggerer", response_model=BilanSuggestionResponse)
+async def post_bilan_semaine_suggerer(discord_id: str, semaine: int, vague: int | None = None, db=Depends(get_db)):
+    """Génère un brouillon de bilan hebdomadaire via l'API Claude, à partir des vraies
+    sessions du membre pour cette semaine — jamais sauvegardé automatiquement, c'est à
+    l'admin de relire/corriger puis d'appeler PUT bilan-semaine."""
+    try:
+        wave, membre = await resolve_wave_et_membre(db, vague, discord_id)
+    except ResolutionError as e:
+        raise HTTPException(404, str(e)) from e
+
+    prompt = await build_bilan_semaine_prompt(db, membre, wave, semaine)
+    try:
+        suggestion = await anthropic_client.generate_bilan_suggestion(prompt)
+    except anthropic_client.AnthropicAPIError as e:
+        raise HTTPException(503, str(e)) from e
+    return BilanSuggestionResponse(suggestion=suggestion)
+
+
+@router.post("/members/{discord_id}/bilan-vague/suggerer", response_model=BilanSuggestionResponse)
+async def post_bilan_vague_suggerer(discord_id: str, vague: int | None = None, db=Depends(get_db)):
+    """Génère un brouillon de bilan de vague via l'API Claude, à partir des bilans
+    hebdo déjà rédigés par l'admin et des sessions de toute la vague."""
+    try:
+        wave, membre = await resolve_wave_et_membre(db, vague, discord_id)
+    except ResolutionError as e:
+        raise HTTPException(404, str(e)) from e
+
+    prompt = await build_bilan_vague_prompt(db, membre, wave)
+    try:
+        suggestion = await anthropic_client.generate_bilan_suggestion(prompt)
+    except anthropic_client.AnthropicAPIError as e:
+        raise HTTPException(503, str(e)) from e
+    return BilanSuggestionResponse(suggestion=suggestion)

@@ -32,6 +32,20 @@ async def upsert_bilan_semaine(
     await db.commit()
 
 
+async def list_bilans_semaine_by_member(
+    db: aiosqlite.Connection, member_id: int, wave_id: int
+) -> list[aiosqlite.Row]:
+    """Tous les bilans hebdo déjà rédigés d'un membre pour une vague, ordonnés par
+    semaine — sert de base au bilan de vague (synthèse S1+S2+S3...), distinct de
+    list_bilans_semaine_by_wave (tous les membres, une semaine)."""
+    db.row_factory = aiosqlite.Row
+    async with db.execute(
+        "SELECT * FROM bilans_semaine WHERE member_id = ? AND wave_id = ? ORDER BY semaine",
+        (member_id, wave_id),
+    ) as cur:
+        return await cur.fetchall()
+
+
 async def list_bilans_semaine_by_wave(
     db: aiosqlite.Connection, wave_id: int, semaine: int
 ) -> list[aiosqlite.Row]:

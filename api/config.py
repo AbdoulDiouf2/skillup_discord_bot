@@ -8,3 +8,4 @@ if GUILD_ID is None:
     raise RuntimeError("GUILD_ID absent — requis par l'API pour la vérification du rôle Admin Discord.")
 
 API_KEY = os.environ["API_KEY"]
+ANTHROPIC_API_KEY = os.environ["ANTHROPIC_API_KEY"]
