@@ -6,6 +6,7 @@ from bot.db.bilans import (
     get_bilan_semaine,
     get_bilan_vague,
     list_bilans_semaine_by_wave,
+    list_bilans_vague_by_wave,
     upsert_bilan_semaine,
     upsert_bilan_vague,
 )
@@ -381,6 +382,14 @@ async def resolve_bilans_semaine_lister(db, vague_id: int | None, semaine: int):
     (texte/ecrit_par/updated_at à None si pas encore rédigé). Retourne (wave, rows)."""
     wave = await _resolve_wave(db, vague_id)
     rows = await list_bilans_semaine_by_wave(db, wave["id"], semaine)
+    return wave, rows
+
+
+async def resolve_bilans_vague_lister(db, vague_id: int | None):
+    """Liste, pour chaque membre de la vague résolue, son bilan de synthèse de vague
+    (texte/ecrit_par/updated_at à None si pas encore rédigé). Retourne (wave, rows)."""
+    wave = await _resolve_wave(db, vague_id)
+    rows = await list_bilans_vague_by_wave(db, wave["id"])
     return wave, rows
 
 

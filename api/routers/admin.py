@@ -7,6 +7,7 @@ from api.deps import get_db, get_caller_discord_id, require_admin
 from api.schemas import (
     BilanMembreOut,
     BilansSemaineListResponse,
+    BilansVagueListResponse,
     BilanTexteOut,
     BilanTexteRequest,
     BinomeActionResponse,
@@ -40,6 +41,7 @@ from bot.services.admin_service import (
     resolve_bilan_semaine_ecrire,
     resolve_bilan_semaine_lire,
     resolve_bilans_semaine_lister,
+    resolve_bilans_vague_lister,
     resolve_bilan_vague_ecrire,
     resolve_bilan_vague_lire,
     resolve_binome_definir,
@@ -448,6 +450,30 @@ async def get_bilans_semaine_endpoint(semaine: int, vague: int | None = None, db
     return BilansSemaineListResponse(
         wave_nom=wave["nom"],
         semaine=semaine,
+        bilans=[
+            BilanMembreOut(
+                discord_id=r["discord_id"],
+                nom=r["nom"],
+                texte=r["texte"],
+                ecrit_par_discord_id=r["ecrit_par_discord_id"],
+                updated_at=r["updated_at"],
+            )
+            for r in rows
+        ],
+    )
+
+
+@router.get("/bilans-vague", response_model=BilansVagueListResponse)
+async def get_bilans_vague_endpoint(vague: int | None = None, db=Depends(get_db)):
+    """Liste, pour chaque membre de la vague, son bilan de synthèse de vague (texte à
+    None si pas encore rédigé) — équivalent de bilans-semaine, sans filtre semaine."""
+    try:
+        wave, rows = await resolve_bilans_vague_lister(db, vague)
+    except ResolutionError as e:
+        raise HTTPException(404, str(e)) from e
+
+    return BilansVagueListResponse(
+        wave_nom=wave["nom"],
         bilans=[
             BilanMembreOut(
                 discord_id=r["discord_id"],

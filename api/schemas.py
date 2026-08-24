@@ -77,6 +77,11 @@ class BilansSemaineListResponse(BaseModel):
     bilans: list[BilanMembreOut]
 
 
+class BilansVagueListResponse(BaseModel):
+    wave_nom: str
+    bilans: list[BilanMembreOut]
+
+
 class MemberOut(BaseModel):
     id: int
     discord_id: str
