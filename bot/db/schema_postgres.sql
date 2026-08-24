@@ -125,3 +125,19 @@ CREATE TABLE IF NOT EXISTS bilans_vague (
     updated_at            TEXT NOT NULL,
     UNIQUE (member_id, wave_id)
 );
+
+-- Réglages de l'assistant IA (suggestion de bilans) — ligne unique (id=1), modifiable
+-- par un admin dans l'onglet Paramètres de CPS Connect. `enabled=FALSE` désactive
+-- entièrement les endpoints /bilan-*/suggerer (403), sans toucher au reste.
+CREATE TABLE IF NOT EXISTS ai_settings (
+    id                     INTEGER PRIMARY KEY DEFAULT 1,
+    enabled                BOOLEAN NOT NULL DEFAULT TRUE,
+    provider               TEXT NOT NULL DEFAULT 'anthropic' CHECK (provider IN ('anthropic', 'groq')),
+    model                  TEXT NOT NULL DEFAULT 'claude-haiku-4-5-20251001',
+    updated_by_discord_id  TEXT,
+    updated_at             TEXT,
+    CHECK (id = 1)
+);
+INSERT INTO ai_settings (id, enabled, provider, model)
+VALUES (1, TRUE, 'anthropic', 'claude-haiku-4-5-20251001')
+ON CONFLICT (id) DO NOTHING;

@@ -86,6 +86,20 @@ class BilanSuggestionResponse(BaseModel):
     suggestion: str
 
 
+class AiSettingsRequest(BaseModel):
+    enabled: bool
+    provider: str
+    model: str
+
+
+class AiSettingsOut(BaseModel):
+    enabled: bool
+    provider: str
+    model: str
+    updated_by_discord_id: str | None = None
+    updated_at: str | None = None
+
+
 class MemberOut(BaseModel):
     id: int
     discord_id: str

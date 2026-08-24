@@ -2,9 +2,11 @@ from datetime import date
 
 from fastapi import APIRouter, Depends, HTTPException
 
-from api import anthropic_client, discord_client
+from api import ai_provider, discord_client
 from api.deps import get_db, get_caller_discord_id, require_admin
 from api.schemas import (
+    AiSettingsOut,
+    AiSettingsRequest,
     BilanMembreOut,
     BilansSemaineListResponse,
     BilanSuggestionResponse,
@@ -39,6 +41,8 @@ from api.schemas import (
     VagueCreerRequest,
 )
 from bot.services.admin_service import (
+    resolve_ai_settings_ecrire,
+    resolve_ai_settings_lire,
     resolve_bilan_semaine_ecrire,
     resolve_bilan_semaine_lire,
     resolve_bilans_semaine_lister,
@@ -562,9 +566,14 @@ async def put_bilan_vague_endpoint(
 
 @router.post("/members/{discord_id}/bilan-semaine/suggerer", response_model=BilanSuggestionResponse)
 async def post_bilan_semaine_suggerer(discord_id: str, semaine: int, vague: int | None = None, db=Depends(get_db)):
-    """Génère un brouillon de bilan hebdomadaire via l'API Claude, à partir des vraies
-    sessions du membre pour cette semaine — jamais sauvegardé automatiquement, c'est à
-    l'admin de relire/corriger puis d'appeler PUT bilan-semaine."""
+    """Génère un brouillon de bilan hebdomadaire via le provider IA configuré (onglet
+    Paramètres), à partir des vraies sessions du membre pour cette semaine — jamais
+    sauvegardé automatiquement, c'est à l'admin de relire/corriger puis d'appeler
+    PUT bilan-semaine. 403 si l'assistant IA est désactivé."""
+    settings = await resolve_ai_settings_lire(db)
+    if not settings["enabled"]:
+        raise HTTPException(403, "Assistant IA désactivé (onglet Paramètres).")
+
     try:
         wave, membre = await resolve_wave_et_membre(db, vague, discord_id)
     except ResolutionError as e:
@@ -572,16 +581,21 @@ async def post_bilan_semaine_suggerer(discord_id: str, semaine: int, vague: int 
 
     prompt = await build_bilan_semaine_prompt(db, membre, wave, semaine)
     try:
-        suggestion = await anthropic_client.generate_bilan_suggestion(prompt)
-    except anthropic_client.AnthropicAPIError as e:
+        suggestion = await ai_provider.generate_suggestion(settings["provider"], settings["model"], prompt)
+    except ai_provider.AIProviderError as e:
         raise HTTPException(503, str(e)) from e
     return BilanSuggestionResponse(suggestion=suggestion)
 
 
 @router.post("/members/{discord_id}/bilan-vague/suggerer", response_model=BilanSuggestionResponse)
 async def post_bilan_vague_suggerer(discord_id: str, vague: int | None = None, db=Depends(get_db)):
-    """Génère un brouillon de bilan de vague via l'API Claude, à partir des bilans
-    hebdo déjà rédigés par l'admin et des sessions de toute la vague."""
+    """Génère un brouillon de bilan de vague via le provider IA configuré, à partir des
+    bilans hebdo déjà rédigés par l'admin et des sessions de toute la vague. 403 si
+    l'assistant IA est désactivé."""
+    settings = await resolve_ai_settings_lire(db)
+    if not settings["enabled"]:
+        raise HTTPException(403, "Assistant IA désactivé (onglet Paramètres).")
+
     try:
         wave, membre = await resolve_wave_et_membre(db, vague, discord_id)
     except ResolutionError as e:
@@ -589,7 +603,24 @@ async def post_bilan_vague_suggerer(discord_id: str, vague: int | None = None, d
 
     prompt = await build_bilan_vague_prompt(db, membre, wave)
     try:
-        suggestion = await anthropic_client.generate_bilan_suggestion(prompt)
-    except anthropic_client.AnthropicAPIError as e:
+        suggestion = await ai_provider.generate_suggestion(settings["provider"], settings["model"], prompt)
+    except ai_provider.AIProviderError as e:
         raise HTTPException(503, str(e)) from e
     return BilanSuggestionResponse(suggestion=suggestion)
+
+
+@router.get("/ai-settings", response_model=AiSettingsOut)
+async def get_ai_settings_endpoint(db=Depends(get_db)):
+    settings = await resolve_ai_settings_lire(db)
+    return AiSettingsOut(**dict(settings))
+
+
+@router.put("/ai-settings", response_model=AiSettingsOut)
+async def put_ai_settings_endpoint(
+    body: AiSettingsRequest, db=Depends(get_db), caller_id: str = Depends(get_caller_discord_id)
+):
+    try:
+        settings = await resolve_ai_settings_ecrire(db, body.enabled, body.provider, body.model, caller_id)
+    except ResolutionError as e:
+        raise HTTPException(400, str(e)) from e
+    return AiSettingsOut(**dict(settings))

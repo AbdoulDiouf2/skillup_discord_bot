@@ -2,7 +2,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 
-from api import anthropic_client, discord_client
+from api import anthropic_client, discord_client, groq_client
 from api.routers import admin as admin_router
 from api.routers import journal as journal_router
 from api.routers import vagues as vagues_router
@@ -14,9 +14,11 @@ async def lifespan(app: FastAPI):
     await init_db()
     discord_client.init_http_client()
     anthropic_client.init_http_client()
+    groq_client.init_http_client()
     yield
     await discord_client.close_http_client()
     await anthropic_client.close_http_client()
+    await groq_client.close_http_client()
     await close_pool()
 
 

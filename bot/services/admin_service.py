@@ -2,6 +2,7 @@ import re
 from datetime import date, datetime
 
 from bot.config import TZ
+from bot.db.ai_settings import get_ai_settings, update_ai_settings
 from bot.db.bilans import (
     get_bilan_semaine,
     get_bilan_vague,
@@ -30,6 +31,8 @@ from bot.services.weeks import week_number_for_date
 # Mêmes champs éditables que la commande Discord /session-corriger (hors "suppression",
 # qui est un domaine d'action séparé — cf. resolve_session_supprimer).
 SESSION_CHAMPS_EDITABLES = ("objectif", "bilan", "blocages", "creneau")
+
+AI_PROVIDERS = ("anthropic", "groq")
 
 # Mêmes valeurs que PROFILS côté bot (bot/cogs/admin.py) — dupliqué ici pour ne pas faire
 # dépendre l'API du module cogs (qui importe discord.py, absent du process API).
@@ -424,6 +427,20 @@ async def resolve_bilan_vague_ecrire(db, vague_id: int | None, discord_id: str, 
     updated_at = datetime.now(TZ).isoformat()
     await upsert_bilan_vague(db, membre["id"], wave["id"], texte, ecrit_par, updated_at)
     return wave, await get_bilan_vague(db, membre["id"], wave["id"])
+
+
+async def resolve_ai_settings_lire(db):
+    return await get_ai_settings(db)
+
+
+async def resolve_ai_settings_ecrire(db, enabled: bool, provider: str, model: str, updated_by: str):
+    if provider not in AI_PROVIDERS:
+        raise ResolutionError(f"Provider invalide : `{provider}`. Valeurs possibles : {', '.join(AI_PROVIDERS)}.")
+    if not model.strip():
+        raise ResolutionError("Le modèle ne peut pas être vide.")
+    updated_at = datetime.now(TZ).isoformat()
+    await update_ai_settings(db, enabled, provider, model.strip(), updated_by, updated_at)
+    return await get_ai_settings(db)
 
 
 def parse_thread_id(raw: str) -> int | None:

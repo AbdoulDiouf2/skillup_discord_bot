@@ -37,11 +37,17 @@ GUILD_ID=<ID serveur Alumni CPS prod>
 DATABASE_URL=postgresql://user:password@host/dbname?sslmode=require   # Neon, même base pour bot ET api
 API_KEY=<clé partagée avec CPS Connect, header X-API-Key>
 ANTHROPIC_API_KEY=<clé API Anthropic — suggestion IA des bilans, api/anthropic_client.py>
+GROQ_API_KEY=<clé API Groq — provider alternatif pour la suggestion IA, api/groq_client.py>
 ```
 
-`ANTHROPIC_API_KEY` n'est utilisée que côté `skillup-api` (jamais exposée à Firebase
-ni au frontend) — sert uniquement à générer un brouillon de bilan à la demande de
-l'admin (bouton "Générer une suggestion (IA)"), jamais d'appel automatique.
+`ANTHROPIC_API_KEY`/`GROQ_API_KEY` ne sont utilisées que côté `skillup-api` (jamais
+exposées à Firebase ni au frontend) — servent uniquement à générer un brouillon de
+bilan à la demande de l'admin (bouton "Générer une suggestion (IA)"), jamais d'appel
+automatique. Les deux sont optionnelles au démarrage (l'API ne plante pas si l'une
+manque) : le provider actif se choisit dans l'onglet Paramètres de CPS Connect
+(table `ai_settings`, une seule ligne) — n'y renseigner que la clé du provider
+réellement sélectionné, ou activer `enabled=false` pour désactiver l'assistant IA
+entièrement sans toucher au `.env`.
 
 `DATABASE_URL` et `API_KEY` **doivent être identiques** entre le bot et l'API
 (même `.env`, chargé par les deux services) — sinon incohérence de données ou
