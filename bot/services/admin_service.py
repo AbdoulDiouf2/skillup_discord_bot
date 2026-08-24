@@ -373,7 +373,7 @@ async def resolve_bilan_semaine_ecrire(
         raise ResolutionError(f"Ce membre n'est pas enregistré dans la vague **{wave['nom']}**.")
     updated_at = datetime.now(TZ).isoformat()
     await upsert_bilan_semaine(db, membre["id"], wave["id"], semaine, texte, ecrit_par, updated_at)
-    return wave, await get_bilan_semaine(db, membre["id"], wave["id"], semaine)
+    return wave, await get_bilan_semaine(db, membre["id"], wave["id"], semaine), membre
 
 
 async def resolve_bilans_semaine_lister(db, vague_id: int | None, semaine: int):

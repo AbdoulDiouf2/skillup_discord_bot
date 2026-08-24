@@ -215,6 +215,18 @@ async def get_thread_starter_content(thread_id: str) -> str | None:
     return ""
 
 
+async def post_channel_message(channel_id: str, content: str) -> bool:
+    """Poste un message dans un salon/fil — best-effort, jamais fatal (même convention
+    que send_dm : fil supprimé, permissions insuffisantes, panne réseau -> False,
+    l'appelant décide comment le signaler, ça ne doit jamais faire échouer l'action
+    métier associée, ex. l'enregistrement d'un bilan)."""
+    try:
+        resp = await _client().post(f"/channels/{channel_id}/messages", json={"content": content})
+        return resp.status_code < 400
+    except httpx.HTTPError:
+        return False
+
+
 async def send_dm(discord_id: str, content: str) -> bool:
     """Envoie un DM à `discord_id` — best-effort, jamais fatal (miroir de `_safe_dm`
     côté bot Discord). Renvoie False sur tout échec (DMs fermés, compte introuvable,

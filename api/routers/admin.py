@@ -424,13 +424,14 @@ async def delete_session_endpoint(session_id: int, db=Depends(get_db)):
     return SessionSupprimerResponse(id=session_id, message=f"Session {session_id} supprimée.")
 
 
-def _bilan_texte_out(bilan) -> BilanTexteOut | None:
+def _bilan_texte_out(bilan, poste_discord: bool | None = None) -> BilanTexteOut | None:
     if bilan is None:
         return None
     return BilanTexteOut(
         texte=bilan["texte"],
         ecrit_par_discord_id=bilan["ecrit_par_discord_id"],
         updated_at=bilan["updated_at"],
+        poste_discord=poste_discord,
     )
 
 
@@ -483,12 +484,25 @@ async def put_bilan_semaine_endpoint(
     caller_id: str = Depends(get_caller_discord_id),
 ):
     """Écrit (upsert) le bilan hebdomadaire d'un membre. Réservé aux admins (gate du
-    router) — `ecrit_par` = l'admin appelant."""
+    router) — `ecrit_par` = l'admin appelant. Si `body.poster` (défaut True) et qu'un
+    post objectif est rattaché, poste aussi le bilan en réponse dans ce fil Discord —
+    best-effort, un échec de post n'invalide jamais l'enregistrement (cf. `poste_discord`
+    dans la réponse pour signaler le résultat à l'UI)."""
     try:
-        _wave, bilan = await resolve_bilan_semaine_ecrire(db, vague, discord_id, semaine, body.valeur, caller_id)
+        wave, bilan, membre = await resolve_bilan_semaine_ecrire(db, vague, discord_id, semaine, body.valeur, caller_id)
     except ResolutionError as e:
         raise HTTPException(404, str(e)) from e
-    return _bilan_texte_out(bilan)
+
+    poste_discord = None
+    if body.poster:
+        thread_id = membre["thread_objectif_id"]
+        if thread_id:
+            texte_discord = f"**Bilan hebdomadaire — {membre['nom']} — vague {wave['nom']}, semaine {semaine}**\n\n{body.valeur}"
+            poste_discord = await discord_client.post_channel_message(thread_id, texte_discord)
+        else:
+            poste_discord = False
+
+    return _bilan_texte_out(bilan, poste_discord)
 
 
 @router.get("/members/{discord_id}/bilan-vague", response_model=BilanTexteOut | None)

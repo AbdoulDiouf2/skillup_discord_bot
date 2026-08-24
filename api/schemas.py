@@ -49,12 +49,18 @@ class BilanResponse(BaseModel):
 
 class BilanTexteRequest(BaseModel):
     valeur: str
+    # Ne concerne que le bilan hebdomadaire (posté en réponse dans le post objectif du
+    # membre) — ignoré par l'endpoint bilan de vague, qui n'a pas d'équivalent Discord.
+    poster: bool = True
 
 
 class BilanTexteOut(BaseModel):
     texte: str
     ecrit_par_discord_id: str
     updated_at: str
+    # None : posting non demandé ou non applicable (bilan de vague). True/False : résultat
+    # du post Discord best-effort (cf. discord_client.post_channel_message).
+    poste_discord: bool | None = None
 
 
 class BilanMembreOut(BaseModel):
