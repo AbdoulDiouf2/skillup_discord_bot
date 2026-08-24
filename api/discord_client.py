@@ -195,10 +195,11 @@ async def get_voice_channels() -> list[dict]:
 async def get_thread_starter_content(thread_id: str) -> str | None:
     """Contenu du message de lancement d'un fil de forum — côté API Discord, ce message
     partage le même ID que le fil lui-même (GET /channels/{thread_id}/messages/{thread_id}).
-    None si introuvable (fil ou message supprimé) plutôt qu'une exception — l'appelant
-    décide comment le signaler. Si `content` est vide (post rédigé avec un embed plutôt
-    qu'en texte brut — cas de certains posts créés à la main avant l'automatisation),
-    retombe sur la description du premier embed."""
+    None UNIQUEMENT si le message/fil est introuvable (404) — jamais pour un contenu vide,
+    pour que l'appelant distingue "rien à récupérer" de "récupéré mais vide" (chaîne vide).
+    Si `content` est vide (post rédigé avec un embed plutôt qu'en texte brut — cas de
+    certains posts créés à la main avant l'automatisation), retombe sur la description du
+    premier embed."""
     resp = await _get_with_retry(
         f"/channels/{thread_id}/messages/{thread_id}", None, "message objectif", allow_404=True
     )
@@ -211,7 +212,7 @@ async def get_thread_starter_content(thread_id: str) -> str | None:
     embeds = data.get("embeds") or []
     if embeds and embeds[0].get("description"):
         return embeds[0]["description"]
-    return content or None
+    return ""
 
 
 async def send_dm(discord_id: str, content: str) -> bool:
