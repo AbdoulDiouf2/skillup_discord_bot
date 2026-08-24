@@ -23,6 +23,8 @@ from api.schemas import (
     MembreAjouterResponse,
     MembreEditerRequest,
     MembreLierThreadRequest,
+    ObjectifsSyncResponse,
+    ObjectifSyncResultOut,
     SalonAjouterRequest,
     SalonOut,
     SalonsListResponse,
@@ -46,6 +48,9 @@ from bot.services.admin_service import (
     resolve_membre_ajouter,
     resolve_membre_editer,
     resolve_membre_lier_thread,
+    resolve_membre_objectif_sync_apply,
+    resolve_membre_objectif_sync_prepare,
+    resolve_membres_objectif_sync_prepare,
     resolve_members_lister,
     resolve_salon_ajouter,
     resolve_salon_retirer,
@@ -209,6 +214,55 @@ async def patch_membre_lier_thread(discord_id: str, body: MembreLierThreadReques
     except ResolutionError as e:
         raise HTTPException(404, str(e)) from e
     return MemberOut(**dict(membre))
+
+
+@router.post("/members/{discord_id}/objectif-vague/sync", response_model=MemberOut)
+async def post_membre_objectif_sync(discord_id: str, vague: int | None = None, db=Depends(get_db)):
+    """Récupère le contenu réel du post objectif Discord déjà rattaché (thread_objectif_id)
+    et l'écrit dans `objectif_vague` — utile pour les membres dont le post a été créé/rempli
+    à la main avant l'automatisation, ou rattaché après coup via /membre-lier-thread."""
+    try:
+        _wave, membre = await resolve_membre_objectif_sync_prepare(db, vague, discord_id)
+    except ResolutionError as e:
+        raise HTTPException(404, str(e)) from e
+
+    try:
+        contenu = await discord_client.get_thread_starter_content(membre["thread_objectif_id"])
+    except discord_client.DiscordAPIError as e:
+        raise HTTPException(503, str(e)) from e
+    if contenu is None:
+        raise HTTPException(404, "Post objectif introuvable sur Discord (supprimé ?).")
+
+    updated = await resolve_membre_objectif_sync_apply(db, membre["id"], contenu)
+    return MemberOut(**dict(updated))
+
+
+@router.post("/objectifs-vague/sync", response_model=ObjectifsSyncResponse)
+async def post_membres_objectif_sync(vague: int | None = None, db=Depends(get_db)):
+    """Synchronise en masse l'objectif de vague de tous les membres ayant un post
+    objectif rattaché — un échec individuel (post supprimé, panne Discord ponctuelle)
+    n'interrompt pas les suivants, chaque résultat est rapporté séparément."""
+    try:
+        _wave, cibles = await resolve_membres_objectif_sync_prepare(db, vague)
+    except ResolutionError as e:
+        raise HTTPException(404, str(e)) from e
+
+    resultats: list[ObjectifSyncResultOut] = []
+    for m in cibles:
+        try:
+            contenu = await discord_client.get_thread_starter_content(m["thread_objectif_id"])
+        except discord_client.DiscordAPIError as e:
+            resultats.append(ObjectifSyncResultOut(discord_id=m["discord_id"], nom=m["nom"], ok=False, message=str(e)))
+            continue
+        if contenu is None:
+            resultats.append(
+                ObjectifSyncResultOut(discord_id=m["discord_id"], nom=m["nom"], ok=False, message="Post introuvable sur Discord.")
+            )
+            continue
+        await resolve_membre_objectif_sync_apply(db, m["id"], contenu)
+        resultats.append(ObjectifSyncResultOut(discord_id=m["discord_id"], nom=m["nom"], ok=True, message="Synchronisé."))
+
+    return ObjectifsSyncResponse(resultats=resultats)
 
 
 @router.get("/sessions", response_model=SessionsListResponse)

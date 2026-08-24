@@ -78,6 +78,18 @@ class MemberOut(BaseModel):
     profil: str
     certif_ou_projet: str | None
     objectif_vague: str | None = None
+    thread_objectif_id: str | None = None
+
+
+class ObjectifSyncResultOut(BaseModel):
+    discord_id: str
+    nom: str
+    ok: bool
+    message: str
+
+
+class ObjectifsSyncResponse(BaseModel):
+    resultats: list[ObjectifSyncResultOut]
 
 
 class MembersResponse(BaseModel):

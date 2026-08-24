@@ -222,6 +222,39 @@ async def resolve_membre_editer(db, vague_id: int | None, discord_id: str, champ
     return wave, await get_member_by_id(db, membre["id"])
 
 
+async def resolve_membre_objectif_sync_prepare(db, vague_id: int | None, discord_id: str):
+    """Résout le membre et vérifie qu'un post objectif est bien rattaché, avant que le
+    routeur aille chercher son contenu réel sur Discord — reste indépendant de
+    discord.py/httpx comme le reste de ce module, l'appel HTTP se fait côté routeur.
+    Retourne (wave, membre)."""
+    wave = await _resolve_wave(db, vague_id)
+    membre = await get_member(db, discord_id, wave["id"])
+    if membre is None:
+        raise ResolutionError(f"Ce membre n'est pas enregistré dans la vague **{wave['nom']}**.")
+    if not membre["thread_objectif_id"]:
+        raise ResolutionError(
+            "Aucun post objectif rattaché à ce membre — utilise d'abord /membre-lier-thread."
+        )
+    return wave, membre
+
+
+async def resolve_membres_objectif_sync_prepare(db, vague_id: int | None):
+    """Retourne (wave, membres) — uniquement les membres de la vague ayant un post
+    objectif rattaché (thread_objectif_id non nul), cible de la synchro en masse."""
+    wave = await _resolve_wave(db, vague_id)
+    membres = await list_by_wave(db, wave["id"])
+    cibles = [m for m in membres if m["thread_objectif_id"]]
+    return wave, cibles
+
+
+async def resolve_membre_objectif_sync_apply(db, member_id: int, contenu: str):
+    """Écrit le contenu récupéré sur Discord dans `objectif_vague` — séparé de
+    resolve_membre_objectif_sync_prepare pour garder l'appel HTTP Discord côté routeur
+    (ce module reste indépendant de httpx/discord.py, même convention que send_dm)."""
+    await update_member_field(db, member_id, "objectif_vague", contenu)
+    return await get_member_by_id(db, member_id)
+
+
 async def resolve_binome_definir(
     db, vague_id: int | None, semaine: int, discord_id_a: str, discord_id_b: str
 ):

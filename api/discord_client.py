@@ -192,6 +192,19 @@ async def get_voice_channels() -> list[dict]:
     return voice_channels
 
 
+async def get_thread_starter_content(thread_id: str) -> str | None:
+    """Contenu du message de lancement d'un fil de forum — côté API Discord, ce message
+    partage le même ID que le fil lui-même (GET /channels/{thread_id}/messages/{thread_id}).
+    None si introuvable (fil ou message supprimé) plutôt qu'une exception — l'appelant
+    décide comment le signaler."""
+    resp = await _get_with_retry(
+        f"/channels/{thread_id}/messages/{thread_id}", None, "message objectif", allow_404=True
+    )
+    if resp.status_code == 404:
+        return None
+    return resp.json()["content"]
+
+
 async def send_dm(discord_id: str, content: str) -> bool:
     """Envoie un DM à `discord_id` — best-effort, jamais fatal (miroir de `_safe_dm`
     côté bot Discord). Renvoie False sur tout échec (DMs fermés, compte introuvable,
