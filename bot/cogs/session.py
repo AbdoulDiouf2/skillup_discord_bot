@@ -192,18 +192,23 @@ class SessionEndModal(discord.ui.Modal, title="Clôturer ta session"):
                 if channel is None:
                     return
 
+            # En rattrapage, `fin` a déjà été posée par l'auto-clôture RG-16 (fin réelle
+            # de la session, pas l'instant où le membre exécute /session-end plus tard) —
+            # on la préserve plutôt que d'écraser avec `now`, sinon la durée affichée
+            # inclut à tort le délai entre l'auto-clôture et le rattrapage.
+            fin = datetime.fromisoformat(open_session["fin"]) if rattrapage else now
             blocages_val = str(self.blocages) if self.blocages else None
-            await end_session(db, open_session["id"], now, str(self.bilan), blocages_val)
+            await end_session(db, open_session["id"], fin, str(self.bilan), blocages_val)
 
             debut = datetime.fromisoformat(open_session["debut"])
-            duree = now - debut
+            duree = fin - debut
             duree_str = str(duree).split(".")[0]
 
             texte = f"{interaction.user.mention} clôture sa session — durée **{duree_str}**.\nBilan : {self.bilan}"
             if blocages_val:
                 texte += f"\nBlocages : {blocages_val}"
             if rattrapage:
-                texte += "\n-# Session rattrapée après la clôture automatique de minuit (RG-16)."
+                texte += "\n-# Session rattrapée après une clôture automatique (créneau dépassé, RG-16)."
             await interaction.response.send_message(texte)
 
 
