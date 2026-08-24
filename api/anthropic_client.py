@@ -35,6 +35,26 @@ async def close_http_client() -> None:
         _http = None
 
 
+async def list_models() -> list[str]:
+    """Modèles Anthropic disponibles pour cette clé — GET /v1/models. Évite de figer
+    une liste en dur côté code (catalogue provider qui change)."""
+    if not ANTHROPIC_API_KEY:
+        raise AnthropicAPIError("ANTHROPIC_API_KEY absente du .env — provider Anthropic indisponible.")
+    if _http is None:
+        raise AnthropicAPIError("Client HTTP Anthropic non initialisé.")
+
+    try:
+        resp = await _http.get("/models", params={"limit": 100})
+    except httpx.HTTPError as e:
+        raise AnthropicAPIError(f"Échec de connexion à l'API Anthropic : {e}") from e
+
+    if resp.status_code >= 400:
+        raise AnthropicAPIError(f"Erreur API Anthropic : {resp.status_code} {resp.text}")
+
+    data = resp.json()
+    return [m["id"] for m in data.get("data", [])]
+
+
 async def generate(prompt: str, model: str) -> str:
     """Envoie `prompt` au modèle Anthropic `model` et retourne le texte généré —
     brouillon de bilan, jamais sauvegardé automatiquement (l'appelant/l'admin décide).

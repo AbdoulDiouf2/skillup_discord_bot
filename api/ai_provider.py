@@ -20,3 +20,17 @@ async def generate_suggestion(provider: str, model: str, prompt: str) -> str:
         except groq_client.GroqAPIError as e:
             raise AIProviderError(str(e)) from e
     raise AIProviderError(f"Provider IA inconnu : {provider!r}.")
+
+
+async def list_models(provider: str) -> list[str]:
+    if provider == "anthropic":
+        try:
+            return await anthropic_client.list_models()
+        except anthropic_client.AnthropicAPIError as e:
+            raise AIProviderError(str(e)) from e
+    if provider == "groq":
+        try:
+            return await groq_client.list_models()
+        except groq_client.GroqAPIError as e:
+            raise AIProviderError(str(e)) from e
+    raise AIProviderError(f"Provider IA inconnu : {provider!r}.")

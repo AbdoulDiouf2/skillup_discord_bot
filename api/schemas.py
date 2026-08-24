@@ -103,6 +103,11 @@ class AiSettingsOut(BaseModel):
     configured_providers: list[str] = []
 
 
+class AiModelsResponse(BaseModel):
+    provider: str
+    models: list[str]
+
+
 class MemberOut(BaseModel):
     id: int
     discord_id: str

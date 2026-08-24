@@ -32,6 +32,26 @@ async def close_http_client() -> None:
         _http = None
 
 
+async def list_models() -> list[str]:
+    """Modèles Groq disponibles pour cette clé — GET /openai/v1/models. Évite de figer
+    une liste en dur côté code (catalogue Groq qui change/déprécie souvent)."""
+    if not GROQ_API_KEY:
+        raise GroqAPIError("GROQ_API_KEY absente du .env — provider Groq indisponible.")
+    if _http is None:
+        raise GroqAPIError("Client HTTP Groq non initialisé.")
+
+    try:
+        resp = await _http.get("/models")
+    except httpx.HTTPError as e:
+        raise GroqAPIError(f"Échec de connexion à l'API Groq : {e}") from e
+
+    if resp.status_code >= 400:
+        raise GroqAPIError(f"Erreur API Groq : {resp.status_code} {resp.text}")
+
+    data = resp.json()
+    return [m["id"] for m in data.get("data", [])]
+
+
 async def generate(prompt: str, model: str) -> str:
     """Envoie `prompt` au modèle Groq `model` (API compatible OpenAI Chat Completions)
     et retourne le texte généré. Même contrat que anthropic_client.generate."""
