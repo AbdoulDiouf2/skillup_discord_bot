@@ -85,6 +85,14 @@ invité du tout, l'API échoue en `404 Unknown Guild` sur les appels
 Checklist Developer Portal / serveur :
 - [ ] Scope `bot` + `applications.commands`
 - [ ] Intent **Server Members** activé (nécessaire RG-11/RG-12, détection vocale)
+- [ ] Intent **Message Content** activé — sans lui, Discord renvoie `content`/`embeds`
+      vides (chaîne `""`, pas d'erreur) pour tout message qui n'est ni écrit par le
+      bot, ni un DM, ni un message où le bot est mentionné, même sur un fetch REST
+      réussi (200). Nécessaire pour la synchro objectif de vague (`GET
+      /channels/{id}/messages/{id}` sur le post d'un membre, `api/discord_client.py`
+      `get_thread_starter_content`). Miroir du flag `intents.message_content = True`
+      dans `bot/main.py` — les deux doivent être activés, le toggle portail seul ou
+      le flag code seul ne suffit pas.
 - [ ] Rôle Discord `Admin SkillUp` créé
 - [ ] Permission **`Manage Server`** cochée sur le rôle `Admin SkillUp` — permet
       aux commandes admin (`default_permissions(manage_guild=True)` côté code)
@@ -161,6 +169,7 @@ DELETE FROM members WHERE id = <id>;
 - [x] `.env` renseigné avec le vrai token de prod (différent du bot de dev)
 - [x] Bot invité sur le serveur Alumni CPS avec le scope `bot` + `applications.commands`
 - [x] Intent `Server Members` activé
+- [x] Intent `Message Content` activé (portail + `bot/main.py`)
 - [x] Rôle Discord `Admin SkillUp` créé, permission `Manage Server` cochée
 - [ ] Salons de coworking déclarés via `/salon-coworking-ajouter`
 - [ ] Vague créée via `/vague-creer` (brouillon), activée via `/vague-activer`, membres ajoutés via `/membre-ajouter`

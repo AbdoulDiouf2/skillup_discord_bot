@@ -21,6 +21,12 @@ INITIAL_COGS = (
 intents = discord.Intents.default()
 intents.voice_states = True
 intents.members = True
+# Nécessaire pour lire le contenu (content/embeds) des messages d'AUTRES membres via
+# l'API REST (ex. synchro objectif de vague depuis un post existant, api/discord_client.py)
+# — sans ce flag ET son équivalent activé dans Developer Portal, Discord renvoie ces champs
+# vides (chaîne "") pour tout message qui n'est ni écrit par le bot, ni un DM, ni un message
+# où le bot est mentionné, même si le fetch REST répond 200.
+intents.message_content = True
 
 bot = commands.Bot(command_prefix="!", intents=intents)
 
