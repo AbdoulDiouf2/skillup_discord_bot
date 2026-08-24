@@ -4,6 +4,7 @@ from api.deps import _check_admin, get_caller_discord_id, get_db, require_api_ke
 from api.schemas import (
     AccessResponse,
     BilanResponse,
+    BilanTexteOut,
     BinomeJournalResponse,
     JournalResponse,
     MemberOut,
@@ -17,6 +18,7 @@ from api.schemas import (
 from bot.db.members import get_member, get_member_all_waves
 from bot.db.waves import get_active_wave, get_wave_by_id
 from bot.services.errors import ResolutionError
+from bot.services.admin_service import resolve_bilan_semaine_lire
 from bot.services.journal_service import (
     resolve_binome_journal,
     resolve_member_sessions,
@@ -136,6 +138,30 @@ async def get_bilan(
 
     resume = summarize_sessions(sessions)
     return BilanResponse(nom=nom, label=label, **resume)
+
+
+@router.get("/bilan-texte-semaine", response_model=BilanTexteOut | None)
+async def get_bilan_texte_semaine(
+    discord_id: str,
+    semaine: int,
+    vague: int | None = None,
+    db=Depends(get_db),
+    _caller: str = Depends(require_self_or_admin()),
+):
+    """Bilan hebdomadaire rédigé à la main par l'admin pour ce membre — lecture seule
+    côté self-service (l'écriture reste réservée aux admins, cf. api/routers/admin.py).
+    Distinct de `/bilan`, qui reste le résumé informatif calculé à la volée."""
+    try:
+        _wave, bilan = await resolve_bilan_semaine_lire(db, vague, discord_id, semaine)
+    except ResolutionError as e:
+        raise HTTPException(404, str(e)) from e
+    if bilan is None:
+        return None
+    return BilanTexteOut(
+        texte=bilan["texte"],
+        ecrit_par_discord_id=bilan["ecrit_par_discord_id"],
+        updated_at=bilan["updated_at"],
+    )
 
 
 @router.get("/objectif-vague", response_model=MemberOut)

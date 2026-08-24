@@ -100,3 +100,28 @@ ALTER TABLE coworking_channels ALTER COLUMN wave_id SET NOT NULL;
 ALTER TABLE coworking_channels DROP CONSTRAINT IF EXISTS coworking_channels_canal_id_key;
 ALTER TABLE coworking_channels DROP CONSTRAINT IF EXISTS coworking_channels_canal_id_wave_id_key;
 ALTER TABLE coworking_channels ADD CONSTRAINT coworking_channels_canal_id_wave_id_key UNIQUE (canal_id, wave_id);
+
+-- Bilans rédigés à la main par l'admin SkillUp — un bilan hebdomadaire par
+-- (membre, vague, semaine), et un bilan de synthèse par (membre, vague).
+-- Contenu informatif (nb sessions, durée, blocages) reste calculé à la volée
+-- via summarize_sessions(), pas stocké ici.
+CREATE TABLE IF NOT EXISTS bilans_semaine (
+    id                    SERIAL PRIMARY KEY,
+    member_id             INTEGER NOT NULL REFERENCES members(id),
+    wave_id               INTEGER NOT NULL REFERENCES waves(id),
+    semaine               INTEGER NOT NULL,
+    texte                 TEXT NOT NULL,
+    ecrit_par_discord_id  TEXT NOT NULL,
+    updated_at            TEXT NOT NULL,
+    UNIQUE (member_id, wave_id, semaine)
+);
+
+CREATE TABLE IF NOT EXISTS bilans_vague (
+    id                    SERIAL PRIMARY KEY,
+    member_id             INTEGER NOT NULL REFERENCES members(id),
+    wave_id               INTEGER NOT NULL REFERENCES waves(id),
+    texte                 TEXT NOT NULL,
+    ecrit_par_discord_id  TEXT NOT NULL,
+    updated_at            TEXT NOT NULL,
+    UNIQUE (member_id, wave_id)
+);

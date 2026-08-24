@@ -3,8 +3,12 @@ from datetime import date
 from fastapi import APIRouter, Depends, HTTPException
 
 from api import discord_client
-from api.deps import get_db, require_admin
+from api.deps import get_db, get_caller_discord_id, require_admin
 from api.schemas import (
+    BilanMembreOut,
+    BilansSemaineListResponse,
+    BilanTexteOut,
+    BilanTexteRequest,
     BinomeActionResponse,
     BinomeDefinirRequest,
     BinomeOut,
@@ -31,6 +35,11 @@ from api.schemas import (
     VagueCreerRequest,
 )
 from bot.services.admin_service import (
+    resolve_bilan_semaine_ecrire,
+    resolve_bilan_semaine_lire,
+    resolve_bilans_semaine_lister,
+    resolve_bilan_vague_ecrire,
+    resolve_bilan_vague_lire,
     resolve_binome_definir,
     resolve_binome_retirer,
     resolve_binomes_semaine,
@@ -350,3 +359,96 @@ async def delete_session_endpoint(session_id: int, db=Depends(get_db)):
         raise HTTPException(404, str(e)) from e
 
     return SessionSupprimerResponse(id=session_id, message=f"Session {session_id} supprimée.")
+
+
+def _bilan_texte_out(bilan) -> BilanTexteOut | None:
+    if bilan is None:
+        return None
+    return BilanTexteOut(
+        texte=bilan["texte"],
+        ecrit_par_discord_id=bilan["ecrit_par_discord_id"],
+        updated_at=bilan["updated_at"],
+    )
+
+
+@router.get("/bilans-semaine", response_model=BilansSemaineListResponse)
+async def get_bilans_semaine_endpoint(semaine: int, vague: int | None = None, db=Depends(get_db)):
+    """Liste, pour chaque membre de la vague, son bilan hebdo de la semaine donnée
+    (texte à None si pas encore rédigé) — vue d'ensemble admin, cf. bilan-semaine
+    ci-dessous pour lire/écrire le bilan d'un seul membre."""
+    try:
+        wave, rows = await resolve_bilans_semaine_lister(db, vague, semaine)
+    except ResolutionError as e:
+        raise HTTPException(404, str(e)) from e
+
+    return BilansSemaineListResponse(
+        wave_nom=wave["nom"],
+        semaine=semaine,
+        bilans=[
+            BilanMembreOut(
+                discord_id=r["discord_id"],
+                nom=r["nom"],
+                texte=r["texte"],
+                ecrit_par_discord_id=r["ecrit_par_discord_id"],
+                updated_at=r["updated_at"],
+            )
+            for r in rows
+        ],
+    )
+
+
+@router.get("/members/{discord_id}/bilan-semaine", response_model=BilanTexteOut | None)
+async def get_bilan_semaine_endpoint(
+    discord_id: str, semaine: int, vague: int | None = None, db=Depends(get_db)
+):
+    """Bilan hebdomadaire rédigé à la main par l'admin pour ce membre — distinct du
+    résumé informatif de `/members/{discord_id}/bilan` (non stocké, calculé à la volée)."""
+    try:
+        _wave, bilan = await resolve_bilan_semaine_lire(db, vague, discord_id, semaine)
+    except ResolutionError as e:
+        raise HTTPException(404, str(e)) from e
+    return _bilan_texte_out(bilan)
+
+
+@router.put("/members/{discord_id}/bilan-semaine", response_model=BilanTexteOut)
+async def put_bilan_semaine_endpoint(
+    discord_id: str,
+    body: BilanTexteRequest,
+    semaine: int,
+    vague: int | None = None,
+    db=Depends(get_db),
+    caller_id: str = Depends(get_caller_discord_id),
+):
+    """Écrit (upsert) le bilan hebdomadaire d'un membre. Réservé aux admins (gate du
+    router) — `ecrit_par` = l'admin appelant."""
+    try:
+        _wave, bilan = await resolve_bilan_semaine_ecrire(db, vague, discord_id, semaine, body.valeur, caller_id)
+    except ResolutionError as e:
+        raise HTTPException(404, str(e)) from e
+    return _bilan_texte_out(bilan)
+
+
+@router.get("/members/{discord_id}/bilan-vague", response_model=BilanTexteOut | None)
+async def get_bilan_vague_endpoint(discord_id: str, vague: int | None = None, db=Depends(get_db)):
+    """Bilan de synthèse de vague rédigé à la main par l'admin pour ce membre."""
+    try:
+        _wave, bilan = await resolve_bilan_vague_lire(db, vague, discord_id)
+    except ResolutionError as e:
+        raise HTTPException(404, str(e)) from e
+    return _bilan_texte_out(bilan)
+
+
+@router.put("/members/{discord_id}/bilan-vague", response_model=BilanTexteOut)
+async def put_bilan_vague_endpoint(
+    discord_id: str,
+    body: BilanTexteRequest,
+    vague: int | None = None,
+    db=Depends(get_db),
+    caller_id: str = Depends(get_caller_discord_id),
+):
+    """Écrit (upsert) le bilan de synthèse de vague d'un membre."""
+    try:
+        _wave, bilan = await resolve_bilan_vague_ecrire(db, vague, discord_id, body.valeur, caller_id)
+    except ResolutionError as e:
+        raise HTTPException(404, str(e)) from e
+    return _bilan_texte_out(bilan)

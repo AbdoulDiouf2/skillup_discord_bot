@@ -2,6 +2,13 @@ import re
 from datetime import date, datetime
 
 from bot.config import TZ
+from bot.db.bilans import (
+    get_bilan_semaine,
+    get_bilan_vague,
+    list_bilans_semaine_by_wave,
+    upsert_bilan_semaine,
+    upsert_bilan_vague,
+)
 from bot.db.binomes import BinomeError, define_binome, get_partner_id, list_binomes_semaine, remove_binome
 from bot.db.coworking_channels import add_channel, list_channels, remove_channel
 from bot.db.members import add_member, get_member, get_member_by_id, list_by_wave, set_thread_objectif_id
@@ -308,6 +315,62 @@ async def resolve_salons_lister(db, vague_id: int | None, actif_seulement: bool)
     contrairement aux autres domaines, `vague_id=None` liste TOUTES les vagues (pas
     seulement la vague active), pour rester cohérent avec le comportement Discord."""
     return await list_channels(db, vague_id, actif_seulement)
+
+
+async def resolve_bilan_semaine_lire(db, vague_id: int | None, discord_id: str, semaine: int):
+    """Retourne (wave, texte du bilan hebdo ou None). Mêmes règles de résolution de
+    membre que /membre-editer (membre doit être enregistré dans la vague résolue)."""
+    wave = await _resolve_wave(db, vague_id)
+    membre = await get_member(db, discord_id, wave["id"])
+    if membre is None:
+        raise ResolutionError(f"Ce membre n'est pas enregistré dans la vague **{wave['nom']}**.")
+    bilan = await get_bilan_semaine(db, membre["id"], wave["id"], semaine)
+    return wave, bilan
+
+
+async def resolve_bilan_semaine_ecrire(
+    db, vague_id: int | None, discord_id: str, semaine: int, texte: str, ecrit_par: str
+):
+    """Écrit (upsert) le bilan hebdo d'un membre pour une semaine donnée. Rédigé à la
+    main par l'admin — jamais généré/pré-rempli automatiquement (cf. `/bilan` pour le
+    résumé informatif qui aide à la rédaction, non stocké)."""
+    wave = await _resolve_wave(db, vague_id)
+    membre = await get_member(db, discord_id, wave["id"])
+    if membre is None:
+        raise ResolutionError(f"Ce membre n'est pas enregistré dans la vague **{wave['nom']}**.")
+    updated_at = datetime.now(TZ).isoformat()
+    await upsert_bilan_semaine(db, membre["id"], wave["id"], semaine, texte, ecrit_par, updated_at)
+    return wave, await get_bilan_semaine(db, membre["id"], wave["id"], semaine)
+
+
+async def resolve_bilans_semaine_lister(db, vague_id: int | None, semaine: int):
+    """Liste, pour chaque membre de la vague résolue, son bilan hebdo pour `semaine`
+    (texte/ecrit_par/updated_at à None si pas encore rédigé). Retourne (wave, rows)."""
+    wave = await _resolve_wave(db, vague_id)
+    rows = await list_bilans_semaine_by_wave(db, wave["id"], semaine)
+    return wave, rows
+
+
+async def resolve_bilan_vague_lire(db, vague_id: int | None, discord_id: str):
+    """Retourne (wave, texte du bilan de vague ou None)."""
+    wave = await _resolve_wave(db, vague_id)
+    membre = await get_member(db, discord_id, wave["id"])
+    if membre is None:
+        raise ResolutionError(f"Ce membre n'est pas enregistré dans la vague **{wave['nom']}**.")
+    bilan = await get_bilan_vague(db, membre["id"], wave["id"])
+    return wave, bilan
+
+
+async def resolve_bilan_vague_ecrire(db, vague_id: int | None, discord_id: str, texte: str, ecrit_par: str):
+    """Écrit (upsert) le bilan de synthèse de vague d'un membre. Rédigé à la main par
+    l'admin, même logique que resolve_bilan_semaine_ecrire."""
+    wave = await _resolve_wave(db, vague_id)
+    membre = await get_member(db, discord_id, wave["id"])
+    if membre is None:
+        raise ResolutionError(f"Ce membre n'est pas enregistré dans la vague **{wave['nom']}**.")
+    updated_at = datetime.now(TZ).isoformat()
+    await upsert_bilan_vague(db, membre["id"], wave["id"], texte, ecrit_par, updated_at)
+    return wave, await get_bilan_vague(db, membre["id"], wave["id"])
 
 
 def parse_thread_id(raw: str) -> int | None:

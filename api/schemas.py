@@ -47,6 +47,30 @@ class BilanResponse(BaseModel):
     blocages: list[str]
 
 
+class BilanTexteRequest(BaseModel):
+    valeur: str
+
+
+class BilanTexteOut(BaseModel):
+    texte: str
+    ecrit_par_discord_id: str
+    updated_at: str
+
+
+class BilanMembreOut(BaseModel):
+    discord_id: str
+    nom: str
+    texte: str | None
+    ecrit_par_discord_id: str | None
+    updated_at: str | None
+
+
+class BilansSemaineListResponse(BaseModel):
+    wave_nom: str
+    semaine: int
+    bilans: list[BilanMembreOut]
+
+
 class MemberOut(BaseModel):
     id: int
     discord_id: str
