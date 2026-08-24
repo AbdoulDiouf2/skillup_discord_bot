@@ -98,6 +98,9 @@ class AiSettingsOut(BaseModel):
     model: str
     updated_by_discord_id: str | None = None
     updated_at: str | None = None
+    # Providers pour lesquels une clé API est présente dans le .env du serveur — permet
+    # à l'UI de prévenir avant de sélectionner un provider sans clé configurée.
+    configured_providers: list[str] = []
 
 
 class MemberOut(BaseModel):

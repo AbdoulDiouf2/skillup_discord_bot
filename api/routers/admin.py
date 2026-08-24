@@ -3,6 +3,7 @@ from datetime import date
 from fastapi import APIRouter, Depends, HTTPException
 
 from api import ai_provider, discord_client
+from api.config import ANTHROPIC_API_KEY, GROQ_API_KEY
 from api.deps import get_db, get_caller_discord_id, require_admin
 from api.schemas import (
     AiSettingsOut,
@@ -433,6 +434,18 @@ async def delete_session_endpoint(session_id: int, db=Depends(get_db)):
     return SessionSupprimerResponse(id=session_id, message=f"Session {session_id} supprimée.")
 
 
+def _configured_ai_providers() -> list[str]:
+    """Providers dont la clé API est présente dans le .env — jamais la clé elle-même,
+    juste sa présence, pour prévenir l'admin avant qu'il sélectionne un provider sans
+    clé configurée sur le serveur."""
+    configured = []
+    if ANTHROPIC_API_KEY:
+        configured.append("anthropic")
+    if GROQ_API_KEY:
+        configured.append("groq")
+    return configured
+
+
 def _bilan_texte_out(bilan, poste_discord: bool | None = None) -> BilanTexteOut | None:
     if bilan is None:
         return None
@@ -612,7 +625,7 @@ async def post_bilan_vague_suggerer(discord_id: str, vague: int | None = None, d
 @router.get("/ai-settings", response_model=AiSettingsOut)
 async def get_ai_settings_endpoint(db=Depends(get_db)):
     settings = await resolve_ai_settings_lire(db)
-    return AiSettingsOut(**dict(settings))
+    return AiSettingsOut(**dict(settings), configured_providers=_configured_ai_providers())
 
 
 @router.put("/ai-settings", response_model=AiSettingsOut)
@@ -623,4 +636,4 @@ async def put_ai_settings_endpoint(
         settings = await resolve_ai_settings_ecrire(db, body.enabled, body.provider, body.model, caller_id)
     except ResolutionError as e:
         raise HTTPException(400, str(e)) from e
-    return AiSettingsOut(**dict(settings))
+    return AiSettingsOut(**dict(settings), configured_providers=_configured_ai_providers())
