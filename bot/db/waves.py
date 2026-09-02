@@ -1,6 +1,8 @@
-from datetime import date
+from datetime import date, datetime
 
 import aiosqlite
+
+from bot.config import TZ
 
 
 class WaveError(Exception):
@@ -69,7 +71,10 @@ async def close_wave(db: aiosqlite.Connection, wave_id: int | None = None) -> ai
         if wave is None:
             raise WaveError("Vague introuvable.")
 
-    await db.execute("UPDATE waves SET statut = 'cloturee' WHERE id = ?", (wave_id,))
+    date_cloture = datetime.now(TZ).isoformat()
+    await db.execute(
+        "UPDATE waves SET statut = 'cloturee', date_cloture = ? WHERE id = ?", (date_cloture, wave_id)
+    )
     await db.commit()
     return await get_wave_by_id(db, wave_id)
 

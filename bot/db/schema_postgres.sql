@@ -7,12 +7,16 @@
 -- datetime.fromisoformat().
 
 CREATE TABLE IF NOT EXISTS waves (
-    id          SERIAL PRIMARY KEY,
-    nom         TEXT NOT NULL,
-    date_debut  TEXT NOT NULL,
-    date_fin    TEXT NOT NULL,
-    statut      TEXT NOT NULL DEFAULT 'brouillon' CHECK (statut IN ('brouillon', 'active', 'cloturee'))
+    id            SERIAL PRIMARY KEY,
+    nom           TEXT NOT NULL,
+    date_debut    TEXT NOT NULL,
+    date_fin      TEXT NOT NULL,
+    statut        TEXT NOT NULL DEFAULT 'brouillon' CHECK (statut IN ('brouillon', 'active', 'cloturee')),
+    date_cloture  TEXT
 );
+
+-- Migration pour les vagues déjà clôturées avant l'ajout de cette colonne.
+ALTER TABLE waves ADD COLUMN IF NOT EXISTS date_cloture TEXT;
 
 -- Une seule vague active à la fois — filet de sécurité en base, en plus du
 -- contrôle applicatif fait dans /vague-activer.

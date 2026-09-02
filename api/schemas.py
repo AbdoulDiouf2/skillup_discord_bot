@@ -236,6 +236,7 @@ class VagueAdminOut(BaseModel):
     date_debut: str
     date_fin: str
     statut: str
+    date_cloture: str | None = None
     thread_bilan_collectif_id: str | None = None
 
 
