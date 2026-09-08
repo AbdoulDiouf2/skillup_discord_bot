@@ -36,6 +36,23 @@ async def list_binomes_semaine(
         return await cur.fetchall()
 
 
+async def list_binomes_by_wave(db: aiosqlite.Connection, wave_id: int) -> list[aiosqlite.Row]:
+    """Tous les binômes de la vague, toutes semaines confondues — pour l'export complet
+    de vague (cf. resolve_vague_export), distinct de list_binomes_semaine (une seule
+    semaine)."""
+    db.row_factory = aiosqlite.Row
+    async with db.execute(
+        """SELECT binomes.*, ma.nom AS nom_a, mb.nom AS nom_b
+           FROM binomes
+           JOIN members ma ON ma.id = binomes.membre_a
+           JOIN members mb ON mb.id = binomes.membre_b
+           WHERE binomes.wave_id = ?
+           ORDER BY binomes.semaine, ma.nom""",
+        (wave_id,),
+    ) as cur:
+        return await cur.fetchall()
+
+
 async def define_binome(
     db: aiosqlite.Connection, wave_id: int, semaine: int, membre_a: int, membre_b: int
 ) -> None:

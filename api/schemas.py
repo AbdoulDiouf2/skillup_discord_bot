@@ -267,6 +267,33 @@ class SalonAjouterRequest(BaseModel):
     vague: int | None = None
 
 
+class BinomeExportOut(BaseModel):
+    semaine: int
+    membre_a: int
+    nom_a: str
+    membre_b: int
+    nom_b: str
+
+
+class BilanHebdoExportOut(BaseModel):
+    semaine: int
+    discord_id: str
+    nom: str
+    texte: str | None
+    ecrit_par_discord_id: str | None
+    updated_at: str | None
+
+
+class VagueExportResponse(BaseModel):
+    vague: VagueAdminOut
+    membres: list[MemberOut]
+    sessions: list[SessionOut]
+    binomes: list[BinomeExportOut]
+    bilans_hebdo: list[BilanHebdoExportOut]
+    bilans_vague: list[BilanMembreOut]
+    salons: list[SalonOut]
+
+
 class ObjectifVagueRequest(BaseModel):
     valeur: str
 

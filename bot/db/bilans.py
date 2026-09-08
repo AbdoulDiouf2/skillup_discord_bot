@@ -65,6 +65,24 @@ async def list_bilans_semaine_by_wave(
         return await cur.fetchall()
 
 
+async def list_bilans_semaine_all_by_wave(db: aiosqlite.Connection, wave_id: int) -> list[aiosqlite.Row]:
+    """Tous les bilans hebdo déjà rédigés de la vague, toutes semaines et tous membres
+    confondus — pour l'export complet de vague (cf. resolve_vague_export). Contrairement
+    à list_bilans_semaine_by_wave, pas de LEFT JOIN : ne renvoie que les bilans réellement
+    écrits (pas une ligne par membre par semaine avec NULL)."""
+    db.row_factory = aiosqlite.Row
+    async with db.execute(
+        "SELECT bilans_semaine.semaine, members.discord_id, members.nom, "
+        "bilans_semaine.texte, bilans_semaine.ecrit_par_discord_id, bilans_semaine.updated_at "
+        "FROM bilans_semaine "
+        "JOIN members ON members.id = bilans_semaine.member_id "
+        "WHERE bilans_semaine.wave_id = ? "
+        "ORDER BY bilans_semaine.semaine, members.nom",
+        (wave_id,),
+    ) as cur:
+        return await cur.fetchall()
+
+
 async def list_bilans_vague_by_wave(db: aiosqlite.Connection, wave_id: int) -> list[aiosqlite.Row]:
     """Un rang par membre de la vague, bilan_texte/ecrit_par/updated_at NULL si le membre
     n'a pas encore de bilan de vague rédigé (LEFT JOIN) — même logique que

@@ -9,6 +9,7 @@ from api.schemas import (
     AiModelsResponse,
     AiSettingsOut,
     AiSettingsRequest,
+    BilanHebdoExportOut,
     BilanMembreOut,
     BilansSemaineListResponse,
     BilanSuggestionResponse,
@@ -17,6 +18,7 @@ from api.schemas import (
     BilanTexteRequest,
     BinomeActionResponse,
     BinomeDefinirRequest,
+    BinomeExportOut,
     BinomeOut,
     BinomesResponse,
     DiscordMemberOut,
@@ -42,6 +44,7 @@ from api.schemas import (
     ThreadBilanCollectifRequest,
     VagueAdminOut,
     VagueCreerRequest,
+    VagueExportResponse,
 )
 from bot.services.admin_service import (
     resolve_ai_settings_ecrire,
@@ -76,6 +79,7 @@ from bot.services.admin_service import (
     resolve_vague_activer,
     resolve_vague_cloturer,
     resolve_vague_creer,
+    resolve_vague_export,
 )
 from bot.services.bilan_ai_service import build_bilan_semaine_prompt, build_bilan_vague_prompt
 from bot.services.errors import ResolutionError
@@ -153,6 +157,40 @@ async def patch_vague_lier_thread_bilan_collectif(
     except ResolutionError as e:
         raise HTTPException(404, str(e)) from e
     return VagueAdminOut(**dict(wave))
+
+
+@router.get("/vagues/{vague_id}/export", response_model=VagueExportResponse)
+async def get_vague_export(vague_id: int, db=Depends(get_db)):
+    """Export complet d'une vague (membres, sessions, binômes toutes semaines, bilans
+    hebdo écrits, bilans de vague, salons de coworking) en un seul appel — sert le bouton
+    "Exporter" de l'onglet Vagues côté CPS Connect. `vague_id` est un path param
+    obligatoire : jamais de résolution "vague active" ambiguë, fonctionne aussi bien sur
+    une vague clôturée."""
+    try:
+        wave, membres, sessions, binomes, bilans_hebdo, bilans_vague, salons = await resolve_vague_export(
+            db, vague_id
+        )
+    except ResolutionError as e:
+        raise HTTPException(404, str(e)) from e
+
+    return VagueExportResponse(
+        vague=VagueAdminOut(**dict(wave)),
+        membres=[MemberOut(**dict(m)) for m in membres],
+        sessions=[SessionOut(**dict(s)) for s in sessions],
+        binomes=[BinomeExportOut(**dict(b)) for b in binomes],
+        bilans_hebdo=[BilanHebdoExportOut(**dict(r)) for r in bilans_hebdo],
+        bilans_vague=[
+            BilanMembreOut(
+                discord_id=r["discord_id"],
+                nom=r["nom"],
+                texte=r["texte"],
+                ecrit_par_discord_id=r["ecrit_par_discord_id"],
+                updated_at=r["updated_at"],
+            )
+            for r in bilans_vague
+        ],
+        salons=[SalonOut(**dict(s)) for s in salons],
+    )
 
 
 @router.get("/salons", response_model=SalonsListResponse)

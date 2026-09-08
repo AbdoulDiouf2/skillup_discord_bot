@@ -7,13 +7,21 @@ from bot.db.bilans import (
     get_bilan_collectif_semaine,
     get_bilan_semaine,
     get_bilan_vague,
+    list_bilans_semaine_all_by_wave,
     list_bilans_semaine_by_wave,
     list_bilans_vague_by_wave,
     upsert_bilan_collectif_semaine,
     upsert_bilan_semaine,
     upsert_bilan_vague,
 )
-from bot.db.binomes import BinomeError, define_binome, get_partner_id, list_binomes_semaine, remove_binome
+from bot.db.binomes import (
+    BinomeError,
+    define_binome,
+    get_partner_id,
+    list_binomes_by_wave,
+    list_binomes_semaine,
+    remove_binome,
+)
 from bot.db.coworking_channels import add_channel, list_channels, remove_channel
 from bot.db.members import add_member, get_member, get_member_by_id, list_by_wave, set_thread_objectif_id
 from bot.db.members import update_field as update_member_field
@@ -408,6 +416,26 @@ async def resolve_bilans_vague_lister(db, vague_id: int | None):
     wave = await _resolve_wave(db, vague_id)
     rows = await list_bilans_vague_by_wave(db, wave["id"])
     return wave, rows
+
+
+async def resolve_vague_export(db, vague_id: int):
+    """Agrège toutes les données d'une vague (membres, sessions, binômes toutes semaines,
+    bilans hebdo écrits, bilans de vague, salons de coworking) pour l'export CSV/JSON/Excel
+    côté admin. Contrairement aux autres resolve_*, `vague_id` est obligatoire (vient d'un
+    path param, jamais de la vague active) — pas d'ambiguïté possible sur une vague
+    clôturée."""
+    wave = await get_wave_by_id(db, vague_id)
+    if wave is None:
+        raise ResolutionError("Vague introuvable.")
+
+    membres = await list_by_wave(db, wave["id"])
+    sessions = await list_filtered(db, wave_id=wave["id"], limit=5000)
+    binomes = await list_binomes_by_wave(db, wave["id"])
+    bilans_hebdo = await list_bilans_semaine_all_by_wave(db, wave["id"])
+    bilans_vague = [r for r in await list_bilans_vague_by_wave(db, wave["id"]) if r["texte"] is not None]
+    salons = await list_channels(db, wave["id"])
+
+    return wave, membres, sessions, binomes, bilans_hebdo, bilans_vague, salons
 
 
 async def resolve_bilan_vague_lire(db, vague_id: int | None, discord_id: str):
